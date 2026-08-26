@@ -22,6 +22,27 @@ nsis:
   createDesktopShortcut: true
   createStartMenuShortcut: true
   shortcutName: GATE Tracker
+mac:
+  target:
+    - target: dmg
+      arch:
+        - x64
+        - arm64
+    - target: zip
+      arch:
+        - x64
+        - arm64
+  category: public.app-category.education
+  hardenedRuntime: false
+  gatekeeperAssess: false
+dmg:
+  contents:
+    - x: 130
+      y: 220
+    - x: 410
+      y: 220
+      type: link
+      path: /Applications
 asar: true
 asarUnpack:
   - "**/*.node"

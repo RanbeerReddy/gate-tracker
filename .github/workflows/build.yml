@@ -1,0 +1,58 @@
+name: Build and Release Desktop App
+
+on:
+  push:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Build (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [macos-latest, windows-latest]
+    
+    env:
+      VITE_SUPABASE_URL: https://bvuwraubchpbfobetdau.supabase.co
+      VITE_SUPABASE_ANON_KEY: sb_publishable_v4DnpY89syLTaebW05YuTA_jyI3eve7
+      NEXT_PUBLIC_SUPABASE_URL: https://bvuwraubchpbfobetdau.supabase.co
+      NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: sb_publishable_v4DnpY89syLTaebW05YuTA_jyI3eve7
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Build for macOS
+        if: runner.os == 'macOS'
+        run: npm run package:mac
+
+      - name: Build for Windows
+        if: runner.os == 'Windows'
+        run: npm run package
+
+      - name: Upload Mac Artifacts (.dmg, .zip)
+        if: runner.os == 'macOS'
+        uses: actions/upload-artifact@v4
+        with:
+          name: GATE-Tracker-macOS
+          path: |
+            release/*.dmg
+            release/*.zip
+
+      - name: Upload Windows Artifacts (.exe)
+        if: runner.os == 'Windows'
+        uses: actions/upload-artifact@v4
+        with:
+          name: GATE-Tracker-Windows
+          path: |
+            release/*.exe
