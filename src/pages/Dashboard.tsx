@@ -1,15 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { DashboardData, Recommendation } from '../types';
-import { useTimer } from '../contexts/TimerContext';
+import { DashboardData, Recommendation, ExamInfo, CommunityPost } from '../types';
+import { fetchCommunityPosts } from '../services/supabase';
 import { useNavigate } from 'react-router-dom';
-
-function formatDuration(seconds: number): string {
-  if (seconds < 60) return `${seconds}s`;
-  const h = Math.floor(seconds / 3600);
-  const m = Math.floor((seconds % 3600) / 60);
-  if (h === 0) return `${m}m`;
-  return `${h}h ${m}m`;
-}
 
 function formatHours(seconds: number): string {
   const h = seconds / 3600;
@@ -20,6 +12,8 @@ export default function Dashboard() {
   const [data, setData] = useState<DashboardData | null>(null);
   const [recommendations, setRecommendations] = useState<Recommendation[]>([]);
   const [settings, setSettings] = useState<Record<string, string>>({});
+  const [examInfo, setExamInfo] = useState<ExamInfo | null>(null);
+  const [recentCommunity, setRecentCommunity] = useState<CommunityPost[]>([]);
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -27,14 +21,20 @@ export default function Dashboard() {
   }, []);
 
   const loadData = async () => {
-    const [dashboard, recs, allSettings] = await Promise.all([
+    const [dashboard, recs, allSettings, exam] = await Promise.all([
       window.electronAPI.analytics.getDashboard(),
       window.electronAPI.analytics.getRecommendations(),
       window.electronAPI.settings.getAll(),
+      window.electronAPI.events.getExamInfo(),
     ]);
     setData(dashboard);
     setRecommendations(recs);
     setSettings(allSettings);
+    setExamInfo(exam);
+
+    fetchCommunityPosts(0, 3, 'latest').then(posts => {
+      setRecentCommunity(posts);
+    }).catch(() => {});
   };
 
   if (!data) return <div className="page"><div className="text-secondary">Loading...</div></div>;
@@ -45,7 +45,7 @@ export default function Dashboard() {
   return (
     <div className="page">
       <div className="page-header">
-        <div className="flex items-center justify-between">
+        <div className="flex items-center justify-between flex-wrap gap-3">
           <div>
             <h1 className="page-title">Dashboard</h1>
             <p className="page-subtitle">
@@ -53,9 +53,32 @@ export default function Dashboard() {
               {settings.target_gate_year && ` • GATE ${settings.target_gate_year}`}
             </p>
           </div>
-          <button className="btn btn-primary btn-lg" onClick={() => navigate('/study')}>
-            ⏱️ Start Study
-          </button>
+
+          <div className="flex items-center gap-3">
+            {/* Exam Countdown Pill */}
+            {examInfo && (
+              <div
+                className="card flex items-center gap-2 cursor-pointer"
+                style={{
+                  padding: '6px 12px',
+                  background: 'rgba(239, 68, 68, 0.1)',
+                  border: '1px solid rgba(239, 68, 68, 0.25)',
+                }}
+                onClick={() => navigate('/calendar')}
+                title="View on Calendar"
+              >
+                <span>🎯</span>
+                <span className="font-semibold text-xs text-primary">{examInfo.examName}</span>
+                <span className="text-xs font-bold" style={{ color: '#EF4444' }}>
+                  {examInfo.daysRemaining}d remaining
+                </span>
+              </div>
+            )}
+
+            <button className="btn btn-primary btn-lg" onClick={() => navigate('/study')}>
+              ⏱️ Start Study
+            </button>
+          </div>
         </div>
       </div>
 
@@ -211,35 +234,54 @@ export default function Dashboard() {
           </div>
         </div>
 
-        {/* Quick Info */}
+        {/* Quick Info & Community Snippet */}
         <div className="section">
-          <div className="section-title">Status</div>
-          <div className="card">
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-3)' }}>
-              <div className="flex items-center justify-between">
-                <span className="text-sm text-secondary">Revision Due</span>
-                <span className="text-sm font-semibold" style={{
-                  color: data.revisionDueCount > 0 ? 'var(--warning)' : 'var(--success)',
-                }}>
-                  {data.revisionDueCount} topics
-                </span>
+          <div className="section-title">Status & Community</div>
+          <div className="card" style={{ display: 'grid', gap: 'var(--space-3)' }}>
+            <div className="flex items-center justify-between">
+              <span className="text-sm text-secondary">Revision Due</span>
+              <span className="text-sm font-semibold" style={{
+                color: data.revisionDueCount > 0 ? 'var(--warning)' : 'var(--success)',
+              }}>
+                {data.revisionDueCount} topics
+              </span>
+            </div>
+            <div className="flex items-center justify-between">
+              <span className="text-sm text-secondary">Recent Mock Score</span>
+              <span className="text-sm font-semibold">
+                {data.recentMocks.length > 0
+                  ? `${data.recentMocks[0].score}/${data.recentMocks[0].total_marks}`
+                  : 'No tests yet'}
+              </span>
+            </div>
+
+            {/* Community mini-feed */}
+            <div className="pt-2 border-t" style={{ borderColor: 'var(--border-primary)' }}>
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-xs font-semibold text-secondary">💬 Recent from Community</span>
+                <button className="btn btn-ghost btn-sm text-accent" onClick={() => navigate('/community')} style={{ padding: '0 4px', fontSize: '11px' }}>
+                  View All →
+                </button>
               </div>
-              <div className="flex items-center justify-between">
-                <span className="text-sm text-secondary">Recent Mock Score</span>
-                <span className="text-sm font-semibold">
-                  {data.recentMocks.length > 0
-                    ? `${data.recentMocks[0].score}/${data.recentMocks[0].total_marks}`
-                    : 'No tests yet'}
-                </span>
-              </div>
-              {data.weakTopics.length > 0 && (
-                <div>
-                  <div className="text-sm text-secondary mb-2">Weak Areas</div>
-                  {data.weakTopics.slice(0, 3).map((t: any, i: number) => (
-                    <div key={i} className="flex items-center gap-2" style={{ marginBottom: '4px' }}>
-                      <span className="color-dot" style={{ background: t.color }} />
-                      <span className="text-sm truncate" style={{ flex: 1 }}>{t.topic_name}</span>
-                      <span className="text-xs text-danger font-medium">{t.accuracy}%</span>
+
+              {recentCommunity.length === 0 ? (
+                <div className="text-xs text-tertiary">
+                  Join the conversation on the Community page to share progress with fellow aspirants.
+                </div>
+              ) : (
+                <div style={{ display: 'grid', gap: '6px' }}>
+                  {recentCommunity.map(p => (
+                    <div
+                      key={p.id}
+                      className="text-xs p-2 rounded cursor-pointer"
+                      style={{ background: 'var(--bg-tertiary)' }}
+                      onClick={() => navigate('/community')}
+                    >
+                      <div className="font-semibold text-primary mb-1">
+                        @{p.author?.username || 'aspirant'}
+                        {p.subject_tag && <span className="text-accent ml-2">[{p.subject_tag}]</span>}
+                      </div>
+                      <div className="truncate text-secondary">{p.content}</div>
                     </div>
                   ))}
                 </div>

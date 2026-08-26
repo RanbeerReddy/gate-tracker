@@ -8,7 +8,7 @@ export default function Settings() {
   const [settings, setSettings] = useState<Record<string, string>>({});
   const [dbInfo, setDbInfo] = useState<any>(null);
   const [backups, setBackups] = useState<any[]>([]);
-  const [tab, setTab] = useState<'general' | 'study' | 'data' | 'about'>('general');
+  const [tab, setTab] = useState<'general' | 'exam' | 'study' | 'data' | 'about'>('general');
 
   useEffect(() => { loadData(); }, []);
 
@@ -27,6 +27,13 @@ export default function Settings() {
     await window.electronAPI.settings.set(key, value);
     setSettings(s => ({ ...s, [key]: value }));
     addToast('Setting updated', 'success');
+  };
+
+  const handleUpdateExam = async (date: string, name: string) => {
+    await window.electronAPI.settings.set('gate_exam_date', date);
+    if (name) await window.electronAPI.settings.set('gate_exam_name', name);
+    setSettings(s => ({ ...s, gate_exam_date: date, gate_exam_name: name || s.gate_exam_name }));
+    addToast('GATE Exam Date updated', 'success');
   };
 
   const handleBackup = async () => {
@@ -77,6 +84,7 @@ export default function Settings() {
 
       <div className="tabs">
         <button className={`tab ${tab === 'general' ? 'active' : ''}`} onClick={() => setTab('general')}>General</button>
+        <button className={`tab ${tab === 'exam' ? 'active' : ''}`} onClick={() => setTab('exam')}>🎯 Exam & Calendar</button>
         <button className={`tab ${tab === 'study' ? 'active' : ''}`} onClick={() => setTab('study')}>Study</button>
         <button className={`tab ${tab === 'data' ? 'active' : ''}`} onClick={() => setTab('data')}>Data & Backup</button>
         <button className={`tab ${tab === 'about' ? 'active' : ''}`} onClick={() => setTab('about')}>About</button>
@@ -108,7 +116,34 @@ export default function Settings() {
 
           <div className="form-group">
             <label className="form-label">Target Score</label>
-            <input className="form-input" value={settings.target_score || ''} onChange={e => updateSetting('target_score', e.target.value)} placeholder="e.g. 55" />
+            <input className="form-input" value={settings.target_score || ''} onChange={e => updateSetting('target_score', e.target.value)} placeholder="e.g. 75" />
+          </div>
+        </div>
+      )}
+
+      {tab === 'exam' && (
+        <div style={{ maxWidth: '500px' }}>
+          <div className="form-group">
+            <label className="form-label">Target GATE Exam Name</label>
+            <input
+              className="form-input"
+              value={settings.gate_exam_name || 'GATE CSE 2027'}
+              onChange={e => updateSetting('gate_exam_name', e.target.value)}
+              placeholder="e.g. GATE CSE 2027"
+            />
+          </div>
+
+          <div className="form-group">
+            <label className="form-label">Exact GATE Exam Date *</label>
+            <input
+              type="date"
+              className="form-input"
+              value={settings.gate_exam_date || '2027-02-07'}
+              onChange={e => handleUpdateExam(e.target.value, settings.gate_exam_name || 'GATE CSE 2027')}
+            />
+            <div className="text-xs text-tertiary mt-2">
+              The Study Calendar and Dashboard countdown will automatically adapt to this date, highlighting the corresponding exam month and placing a star marker on exam day.
+            </div>
           </div>
         </div>
       )}
@@ -173,10 +208,10 @@ export default function Settings() {
         <div style={{ maxWidth: '500px' }}>
           <div className="card">
             <div className="font-bold" style={{ fontSize: 'var(--text-lg)', marginBottom: 'var(--space-3)' }}>
-              GATE Tracker v1.0.0
+              GATE Tracker v1.1.0
             </div>
             <div className="text-sm text-secondary" style={{ marginBottom: 'var(--space-4)' }}>
-              Your personal GATE CSE preparation operating system. All data stored locally.
+              Your personal GATE CSE preparation operating system + Community layer. All personal study data stored locally.
             </div>
             {dbInfo && (
               <div style={{ display: 'grid', gap: 'var(--space-2)' }}>
