@@ -1,6 +1,7 @@
 import React from 'react';
-import { NavLink, useNavigate } from 'react-router-dom';
+import { NavLink } from 'react-router-dom';
 import { useTimer } from '../../contexts/TimerContext';
+import { useAuth } from '../../contexts/AuthContext';
 
 interface NavItem {
   path: string;
@@ -15,6 +16,7 @@ interface SidebarProps {
 
 export default function Sidebar({ revisionDueCount = 0 }: SidebarProps) {
   const { timer } = useTimer();
+  const { user, profile, mode } = useAuth();
 
   const mainNav: NavItem[] = [
     { path: '/', icon: '📊', label: 'Dashboard' },
@@ -35,6 +37,11 @@ export default function Sidebar({ revisionDueCount = 0 }: SidebarProps) {
     { path: '/goals', icon: '🎯', label: 'Goals' },
     { path: '/calendar', icon: '📆', label: 'Calendar' },
     { path: '/analytics', icon: '📈', label: 'Analytics' },
+  ];
+
+  const socialNav: NavItem[] = [
+    { path: '/community', icon: '💬', label: 'Community' },
+    { path: '/people', icon: '👥', label: 'People' },
   ];
 
   const systemNav: NavItem[] = [
@@ -68,12 +75,50 @@ export default function Sidebar({ revisionDueCount = 0 }: SidebarProps) {
           <span>GATE Tracker</span>
         </div>
       </div>
+
       <nav className="sidebar-nav">
         {renderSection('Main', mainNav)}
         {renderSection('Tracking', trackingNav)}
         {renderSection('Planning', planningNav)}
+        {renderSection('Social', socialNav)}
         {renderSection('System', systemNav)}
       </nav>
+
+      {/* User Profile / Account Entry Control */}
+      <div style={{ padding: 'var(--space-2) var(--space-3)', borderTop: '1px solid var(--border-primary)' }}>
+        <NavLink
+          to="/profile"
+          className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}
+          style={{ padding: 'var(--space-2) var(--space-3)', borderRadius: 'var(--radius-md)' }}
+        >
+          <div
+            style={{
+              width: '24px',
+              height: '24px',
+              borderRadius: '50%',
+              background: mode === 'authenticated' ? 'var(--accent)' : 'var(--bg-tertiary)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              fontSize: '11px',
+              fontWeight: 700,
+              color: '#fff',
+              flexShrink: 0,
+            }}
+          >
+            {mode === 'authenticated' ? (profile?.username || 'U')[0].toUpperCase() : '👤'}
+          </div>
+          <div className="truncate" style={{ flex: 1, fontSize: 'var(--text-xs)' }}>
+            <div className="font-semibold text-primary truncate">
+              {mode === 'authenticated' ? (profile?.display_name || `@${profile?.username}`) : 'Local Mode'}
+            </div>
+            <div className="text-tertiary" style={{ fontSize: '10px' }}>
+              {mode === 'authenticated' ? (profile?.target_gate_year ? `GATE ${profile.target_gate_year}` : 'Online') : 'Sign In'}
+            </div>
+          </div>
+        </NavLink>
+      </div>
+
       {timer.isRunning && (
         <div style={{
           padding: 'var(--space-3) var(--space-4)',
