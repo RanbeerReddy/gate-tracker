@@ -5,6 +5,7 @@ import path from 'path';
 export default defineConfig({
   plugins: [react()],
   base: './',
+  envPrefix: ['VITE_', 'NEXT_PUBLIC_'],
   build: {
     outDir: 'dist',
     emptyOutDir: true,

@@ -19,6 +19,10 @@ import Analytics from './pages/Analytics';
 import SearchPage from './pages/Search';
 import Settings from './pages/Settings';
 import FirstRun from './pages/FirstRun';
+import Community from './pages/Community';
+import People from './pages/People';
+import Profile from './pages/Profile';
+import { createCommunityPost } from './services/supabase';
 
 export default function App() {
   const [isFirstRun, setIsFirstRun] = useState<boolean | null>(null);
@@ -28,6 +32,7 @@ export default function App() {
   const [finishNotes, setFinishNotes] = useState('');
   const [finishQuestions, setFinishQuestions] = useState(0);
   const [finishRating, setFinishRating] = useState(0);
+  const [shareWithCommunity, setShareWithCommunity] = useState(false);
 
   useEffect(() => {
     window.electronAPI.setup.isFirstRun().then(setIsFirstRun);
@@ -53,15 +58,35 @@ export default function App() {
   }
 
   const handleFinish = async () => {
+    const elapsedMinutes = Math.round(timer.elapsed / 60);
+    const subject = timer.subjectName;
+
     await finishSession({
       notes: finishNotes,
       questions_solved: finishQuestions,
       focus_rating: finishRating || undefined,
     });
+
+    // Optionally share safe summary to community if requested
+    if (shareWithCommunity) {
+      try {
+        const summaryText = `Completed a ${elapsedMinutes}m study session on ${subject || 'GATE preparation'}.${finishQuestions > 0 ? ` Solved ${finishQuestions} practice questions.` : ''}`;
+        await createCommunityPost(summaryText, subject || null, {
+          subject_name: subject,
+          hours_studied: Math.round((timer.elapsed / 3600) * 10) / 10,
+          questions_solved: finishQuestions || 0,
+          activity_type: timer.activityType,
+        });
+      } catch (err) {
+        console.warn('Could not post session summary to community:', err);
+      }
+    }
+
     setShowFinishModal(false);
     setFinishNotes('');
     setFinishQuestions(0);
     setFinishRating(0);
+    setShareWithCommunity(false);
   };
 
   return (
@@ -83,6 +108,9 @@ export default function App() {
           <Route path="/goals" element={<Goals />} />
           <Route path="/calendar" element={<Calendar />} />
           <Route path="/analytics" element={<Analytics />} />
+          <Route path="/community" element={<Community />} />
+          <Route path="/people" element={<People />} />
+          <Route path="/profile" element={<Profile />} />
           <Route path="/search" element={<SearchPage />} />
           <Route path="/settings" element={<Settings />} />
         </Routes>
@@ -165,6 +193,16 @@ export default function App() {
                 onChange={e => setFinishNotes(e.target.value)}
                 placeholder="What did you cover?"
               />
+            </div>
+            <div className="form-group">
+              <label className="flex items-center gap-2 text-xs text-secondary cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={shareWithCommunity}
+                  onChange={e => setShareWithCommunity(e.target.checked)}
+                />
+                <span>Share safe session summary to Community feed (sanitized stats only)</span>
+              </label>
             </div>
             <div className="form-actions">
               <button className="btn btn-secondary" onClick={() => setShowFinishModal(false)}>Cancel</button>

@@ -5,6 +5,7 @@ import App from './App';
 import { ThemeProvider } from './contexts/ThemeContext';
 import { ToastProvider } from './contexts/ToastContext';
 import { TimerProvider } from './contexts/TimerContext';
+import { AuthProvider } from './contexts/AuthContext';
 import './index.css';
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
@@ -12,9 +13,11 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
     <HashRouter>
       <ThemeProvider>
         <ToastProvider>
-          <TimerProvider>
-            <App />
-          </TimerProvider>
+          <AuthProvider>
+            <TimerProvider>
+              <App />
+            </TimerProvider>
+          </AuthProvider>
         </ToastProvider>
       </ThemeProvider>
     </HashRouter>
