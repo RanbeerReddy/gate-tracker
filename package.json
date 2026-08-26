@@ -12,10 +12,13 @@
     "build:electron": "node scripts/build-electron.mjs",
     "build": "npm run build:renderer && npm run build:electron",
     "package": "npm run build && electron-builder --win --publish never",
+    "package:mac": "npm run build && electron-builder --mac --publish never",
+    "package:all": "npm run build && electron-builder -mw --publish never",
     "postinstall": "electron-builder install-app-deps",
     "start": "electron ."
   },
   "dependencies": {
+    "@supabase/supabase-js": "^2.109.0",
     "better-sqlite3": "^11.6.0",
     "date-fns": "^4.1.0",
     "react": "^18.3.1",

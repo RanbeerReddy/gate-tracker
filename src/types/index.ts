@@ -263,6 +263,121 @@ export const TOPIC_STATUSES: { value: TopicStatus; label: string; color: string 
   { value: 'strong', label: 'Strong', color: '#8B5CF6' },
 ];
 
+// ========== Calendar & Exam Event Types ==========
+
+export interface CalendarEvent {
+  id: number;
+  name: string;
+  event_date: string;
+  end_date: string | null;
+  color: string;
+  event_type: 'exam' | 'mock_test' | 'revision_deadline' | 'phase_deadline' | 'custom';
+  description: string | null;
+  is_exam: number;
+  is_active: number;
+  created_at: string;
+}
+
+export interface ExamInfo {
+  examDate: string;
+  examName: string;
+  daysRemaining: number;
+  isPast: boolean;
+  event: CalendarEvent | null;
+}
+
+// ========== Social & Community Types ==========
+
+export interface UserProfile {
+  id: string;
+  username: string;
+  display_name: string;
+  avatar_url: string | null;
+  bio: string | null;
+  target_gate_year: number | null;
+  target_score: number | null;
+  created_at: string;
+  updated_at: string;
+  // Attached privacy & progress (if permitted)
+  privacy?: PrivacySettings;
+  progress?: SharedProgress;
+  is_friend?: boolean;
+  friendship_status?: 'pending' | 'accepted' | 'none';
+}
+
+export interface PrivacySettings {
+  user_id: string;
+  share_profile: boolean;
+  share_calendar: boolean;
+  share_study_hours: boolean;
+  share_question_stats: boolean;
+  share_syllabus_progress: boolean;
+  share_mock_performance: boolean;
+  share_subject_progress: boolean;
+  visibility: 'public' | 'friends' | 'private';
+  updated_at?: string;
+}
+
+export interface SharedProgress {
+  user_id: string;
+  total_study_hours: number;
+  days_studied: number;
+  current_streak: number;
+  questions_solved: number;
+  overall_accuracy: number;
+  syllabus_completion: number;
+  subject_progress: { name: string; color: string; completion: number; hours: number }[];
+  updated_at: string;
+}
+
+export interface SharedCalendarDay {
+  id?: string;
+  user_id: string;
+  date: string;
+  study_hours: number;
+  studied: boolean;
+}
+
+export interface CommunityPost {
+  id: string;
+  user_id: string;
+  content: string;
+  subject_tag: string | null;
+  shared_stats: {
+    subject_name?: string;
+    hours_studied?: number;
+    questions_solved?: number;
+    accuracy?: number;
+    activity_type?: string;
+  } | null;
+  likes_count: number;
+  comments_count: number;
+  created_at: string;
+  updated_at: string;
+  // Computed / Joined
+  author?: UserProfile;
+  has_liked?: boolean;
+}
+
+export interface PostComment {
+  id: string;
+  post_id: string;
+  user_id: string;
+  content: string;
+  created_at: string;
+  author?: UserProfile;
+}
+
+export interface Friendship {
+  id: string;
+  requester_id: string;
+  addressee_id: string;
+  status: 'pending' | 'accepted' | 'rejected' | 'blocked';
+  created_at: string;
+  updated_at: string;
+  friend_profile?: UserProfile;
+}
+
 // ========== Dashboard Types ==========
 
 export interface DashboardData {
@@ -406,6 +521,14 @@ export interface ElectronAPI {
     getHeatmap: (year: number) => Promise<any[]>;
     getSubjectStats: (subjectId: number) => Promise<any>;
     getTopicStats: (topicId: number) => Promise<any>;
+  };
+  events: {
+    getAll: () => Promise<CalendarEvent[]>;
+    getByDateRange: (range: { startDate: string; endDate: string }) => Promise<CalendarEvent[]>;
+    create: (data: Partial<CalendarEvent>) => Promise<CalendarEvent>;
+    update: (id: number, data: Partial<CalendarEvent>) => Promise<CalendarEvent>;
+    delete: (id: number) => Promise<{ success: boolean }>;
+    getExamInfo: () => Promise<ExamInfo>;
   };
   settings: {
     get: (key: string) => Promise<string | null>;
