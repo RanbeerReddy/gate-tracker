@@ -9,6 +9,7 @@ import { registerGoalHandlers } from './goals';
 import { registerAnalyticsHandlers } from './analytics';
 import { registerSettingsHandlers } from './settings';
 import { registerSearchHandlers } from './search';
+import { registerEventHandlers } from './events';
 import { log } from '../utils/logger';
 
 export function registerAllHandlers(): void {
@@ -23,5 +24,6 @@ export function registerAllHandlers(): void {
   registerAnalyticsHandlers();
   registerSettingsHandlers();
   registerSearchHandlers();
+  registerEventHandlers();
   log('All IPC handlers registered.');
 }

@@ -236,6 +236,36 @@ const MIGRATIONS = [
       );
     `,
   },
+  {
+    version: 2,
+    name: 'calendar_events_and_exam_settings',
+    up: `
+      -- Calendar & Exam Events
+      CREATE TABLE IF NOT EXISTS calendar_events (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL,
+        event_date TEXT NOT NULL,
+        end_date TEXT,
+        color TEXT NOT NULL DEFAULT '#EF4444',
+        event_type TEXT NOT NULL DEFAULT 'exam',
+        description TEXT,
+        is_exam INTEGER NOT NULL DEFAULT 0,
+        is_active INTEGER NOT NULL DEFAULT 1,
+        created_at TEXT DEFAULT (datetime('now'))
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_events_date ON calendar_events(event_date);
+      CREATE INDEX IF NOT EXISTS idx_events_exam ON calendar_events(is_exam);
+
+      -- Seed default GATE CSE 2027 event
+      INSERT OR IGNORE INTO calendar_events (name, event_date, color, event_type, description, is_exam)
+      VALUES ('GATE CSE 2027', '2027-02-07', '#EF4444', 'exam', 'Official GATE CSE Exam Date', 1);
+
+      -- Seed default settings for exam date
+      INSERT OR IGNORE INTO settings (key, value) VALUES ('gate_exam_date', '2027-02-07');
+      INSERT OR IGNORE INTO settings (key, value) VALUES ('gate_exam_name', 'GATE CSE 2027');
+    `,
+  },
 ];
 
 export function runMigrations(): void {

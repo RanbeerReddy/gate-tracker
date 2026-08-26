@@ -187,9 +187,11 @@ const DEFAULT_SETTINGS: Record<string, string> = {
   daily_study_target_hours: '7',
   revision_intervals: '1,3,7,14,30',
   first_run_complete: 'false',
-  target_gate_year: '',
+  target_gate_year: '2027',
   target_score: '',
   target_rank: '',
+  gate_exam_date: '2027-02-07',
+  gate_exam_name: 'GATE CSE 2027',
 };
 
 export function seedData(): void {

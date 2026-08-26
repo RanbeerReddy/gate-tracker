@@ -153,6 +153,16 @@ contextBridge.exposeInMainWorld('electronAPI', {
     complete: (data: any) => ipcRenderer.invoke('setup:complete', data),
   },
 
+  // Calendar & Exam Events
+  events: {
+    getAll: () => ipcRenderer.invoke('events:getAll'),
+    getByDateRange: (range: { startDate: string; endDate: string }) => ipcRenderer.invoke('events:getByDateRange', range),
+    create: (data: any) => ipcRenderer.invoke('events:create', data),
+    update: (id: number, data: any) => ipcRenderer.invoke('events:update', id, data),
+    delete: (id: number) => ipcRenderer.invoke('events:delete', id),
+    getExamInfo: () => ipcRenderer.invoke('events:getExamInfo'),
+  },
+
   // Events from main process
   onForceSaveSession: (callback: () => void) => {
     ipcRenderer.on('force-save-session', callback);

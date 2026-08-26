@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, dialog, shell } from 'electron';
+import { app, BrowserWindow, ipcMain, dialog, shell, Menu } from 'electron';
 import path from 'path';
 import { initDatabase, closeDatabase, getDatabase } from './database/connection';
 import { runMigrations } from './database/migrations';
@@ -12,6 +12,9 @@ let mainWindow: BrowserWindow | null = null;
 const VITE_DEV_SERVER_URL = process.env.VITE_DEV_SERVER_URL;
 
 function createWindow(): void {
+  // Remove default application menu
+  Menu.setApplicationMenu(null);
+
   mainWindow = new BrowserWindow({
     width: 1400,
     height: 900,
@@ -20,6 +23,7 @@ function createWindow(): void {
     title: 'GATE Tracker',
     icon: path.join(__dirname, '../resources/icon.ico'),
     backgroundColor: '#0f1117',
+    autoHideMenuBar: true,
     show: false,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
@@ -28,6 +32,8 @@ function createWindow(): void {
       sandbox: false,
     },
   });
+
+  mainWindow.removeMenu();
 
   // Show when ready to avoid flash
   mainWindow.once('ready-to-show', () => {
