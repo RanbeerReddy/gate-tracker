@@ -1,5 +1,6 @@
 import { getSupabase } from './supabase';
 import { PrivacySettings } from '../types';
+import { formatLocalDate } from '../utils/dateUtils';
 
 /**
  * Aggregates local study data from SQLite and publishes ONLY authorized,
@@ -33,14 +34,14 @@ export async function syncLocalProgressToCloud(userId: string, privacy: PrivacyS
       const [dashboard, heatmap, studyStats, questionStats] = await Promise.all([
         window.electronAPI.analytics.getDashboard(),
         window.electronAPI.analytics.getHeatmap(new Date().getFullYear()),
-        window.electronAPI.analytics.getStudyAnalytics(365),
-        window.electronAPI.analytics.getQuestionAnalytics(365),
+        window.electronAPI.analytics.getStudyAnalytics({ days: 365 }),
+        window.electronAPI.analytics.getQuestionAnalytics({ days: 365 }),
       ]);
 
-      const totalHours = Math.round(((dashboard.week?.studySeconds || 0) / 3600 + (studyStats?.total_hours || 0)) * 10) / 10;
+      const totalHours = Math.round((studyStats?.totals?.total_hours || (dashboard.week?.studySeconds || 0) / 3600) * 10) / 10;
       const daysStudied = heatmap.filter((h: any) => h.hours > 0).length;
 
-      // Calculate current study streak
+      // Calculate current study streak using exact local calendar days
       let streak = 0;
       const today = new Date();
       const heatmapMap = new Map(heatmap.map((h: any) => [h.date, h.hours]));
@@ -48,7 +49,7 @@ export async function syncLocalProgressToCloud(userId: string, privacy: PrivacyS
       for (let i = 0; i < 365; i++) {
         const d = new Date(today);
         d.setDate(d.getDate() - i);
-        const dateStr = d.toISOString().slice(0, 10);
+        const dateStr = formatLocalDate(d);
         const hours = heatmapMap.get(dateStr) || 0;
         if (hours > 0) {
           streak++;
