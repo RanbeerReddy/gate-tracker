@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { fetchSharedCalendar } from '../../services/supabase';
 import { SharedCalendarDay, UserProfile } from '../../types';
+import { formatLocalDate } from '../../utils/dateUtils';
 
 interface Props {
   user: UserProfile;
@@ -27,7 +28,7 @@ export default function SharedCalendarModal({ user, onClose }: Props) {
     const map = new Map(calendarDays.map(d => [d.date, d]));
 
     for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
-      const dateStr = d.toISOString().slice(0, 10);
+      const dateStr = formatLocalDate(d);
       const data = map.get(dateStr);
       days.push({
         user_id: user.id,

@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { CalendarEvent, ExamInfo } from '../types';
 import { useToast } from '../contexts/ToastContext';
+import { formatLocalDate, parseLocalDate } from '../utils/dateUtils';
 
 export default function Calendar() {
   const [year, setYear] = useState(new Date().getFullYear());
@@ -13,7 +14,7 @@ export default function Calendar() {
 
   const [eventForm, setEventForm] = useState({
     name: '',
-    event_date: new Date().toISOString().slice(0, 10),
+    event_date: formatLocalDate(new Date()),
     color: '#EF4444',
     event_type: 'exam' as any,
     description: '',
@@ -44,7 +45,7 @@ export default function Calendar() {
     setShowAddEvent(false);
     setEventForm({
       name: '',
-      event_date: new Date().toISOString().slice(0, 10),
+      event_date: formatLocalDate(new Date()),
       color: '#EF4444',
       event_type: 'exam',
       description: '',
@@ -61,7 +62,7 @@ export default function Calendar() {
   };
 
   // Exam month and date detection
-  const examDateObj = examInfo?.examDate ? new Date(examInfo.examDate) : null;
+  const examDateObj = examInfo?.examDate ? parseLocalDate(examInfo.examDate) : null;
   const examYear = examDateObj ? examDateObj.getFullYear() : null;
   const examMonth = examDateObj ? examDateObj.getMonth() : null;
   const examDateStr = examInfo?.examDate || '';
@@ -81,7 +82,7 @@ export default function Calendar() {
     }
 
     for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
-      const dateStr = d.toISOString().slice(0, 10);
+      const dateStr = formatLocalDate(d);
       const data = heatmapMap.get(dateStr);
       const dayEvents = eventsMap.get(dateStr) || [];
       const isExamDay = dateStr === examDateStr;
