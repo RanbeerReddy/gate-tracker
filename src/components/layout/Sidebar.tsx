@@ -16,7 +16,20 @@ interface SidebarProps {
 
 export default function Sidebar({ revisionDueCount = 0 }: SidebarProps) {
   const { timer } = useTimer();
-  const { user, profile, mode } = useAuth();
+  const { user, profile, mode, isLoading } = useAuth();
+
+  // Build safe display values — never show "undefined"
+  const userInitial = profile?.display_name?.[0]?.toUpperCase()
+    || profile?.username?.[0]?.toUpperCase()
+    || user?.email?.[0]?.toUpperCase()
+    || 'U';
+  const displayName = profile?.display_name
+    || (profile?.username ? `@${profile.username}` : null)
+    || user?.email?.split('@')[0]
+    || 'Signed In';
+  const displaySub = profile?.target_gate_year
+    ? `GATE ${profile.target_gate_year}`
+    : 'Signed In';
 
   const mainNav: NavItem[] = [
     { path: '/', icon: '📊', label: 'Dashboard' },
@@ -106,14 +119,14 @@ export default function Sidebar({ revisionDueCount = 0 }: SidebarProps) {
               flexShrink: 0,
             }}
           >
-            {mode === 'authenticated' ? (profile?.username || 'U')[0].toUpperCase() : '👤'}
+            {mode === 'authenticated' ? userInitial : '👤'}
           </div>
           <div className="truncate" style={{ flex: 1, fontSize: 'var(--text-xs)' }}>
             <div className="font-semibold text-primary truncate">
-              {mode === 'authenticated' ? (profile?.display_name || `@${profile?.username}`) : 'Local Mode'}
+              {mode === 'authenticated' ? displayName : 'Local Mode'}
             </div>
             <div className="text-tertiary" style={{ fontSize: '10px' }}>
-              {mode === 'authenticated' ? (profile?.target_gate_year ? `GATE ${profile.target_gate_year}` : 'Online') : 'Sign In'}
+              {mode === 'authenticated' ? displaySub : 'Sign In'}
             </div>
           </div>
         </NavLink>

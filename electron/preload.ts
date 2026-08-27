@@ -153,6 +153,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
     complete: (data: any) => ipcRenderer.invoke('setup:complete', data),
   },
 
+  // Privacy Settings (local cache)
+  privacy: {
+    get: () => ipcRenderer.invoke('privacy:get'),
+    set: (settings: any) => ipcRenderer.invoke('privacy:set', settings),
+  },
+
   // Calendar & Exam Events
   events: {
     getAll: () => ipcRenderer.invoke('events:getAll'),

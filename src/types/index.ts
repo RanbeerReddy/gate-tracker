@@ -550,6 +550,10 @@ export interface ElectronAPI {
     isFirstRun: () => Promise<boolean>;
     complete: (data: any) => Promise<void>;
   };
+  privacy: {
+    get: () => Promise<Omit<PrivacySettings, 'user_id' | 'updated_at'> | null>;
+    set: (settings: Partial<PrivacySettings>) => Promise<void>;
+  };
   onForceSaveSession: (callback: () => void) => () => void;
 }
 

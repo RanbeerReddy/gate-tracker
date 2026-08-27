@@ -4,7 +4,7 @@ import { useToast } from '../contexts/ToastContext';
 import SharedCalendarModal from '../components/social/SharedCalendarModal';
 
 export default function Profile() {
-  const { user, profile, privacySettings, mode, signIn, signUp, signOut, updateProfile, updatePrivacy, syncProgress } = useAuth();
+  const { user, profile, privacySettings, mode, signIn, signUp, signOut, updateProfile, updatePrivacy, syncProgress, refreshProfile } = useAuth();
   const { addToast } = useToast();
 
   // Auth Form State
@@ -15,6 +15,7 @@ export default function Profile() {
   const [displayName, setDisplayName] = useState('');
   const [targetYear, setTargetYear] = useState<number>(new Date().getFullYear() + 1);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isSigningOut, setIsSigningOut] = useState(false);
 
   // Edit Profile State
   const [showEditModal, setShowEditModal] = useState(false);
@@ -27,6 +28,11 @@ export default function Profile() {
   // Preview Shared Calendar state
   const [showCalendarPreview, setShowCalendarPreview] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
+
+  // Build safe display values — never show "undefined"
+  const safeUsername = profile?.username || user?.user_metadata?.username || user?.email?.split('@')[0] || 'user';
+  const safeDisplayName = profile?.display_name || user?.user_metadata?.display_name || safeUsername;
+  const safeInitial = safeDisplayName[0]?.toUpperCase() || 'A';
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -79,9 +85,13 @@ export default function Profile() {
 
   const handleManualSync = async () => {
     setIsSyncing(true);
-    await syncProgress();
+    try {
+      await syncProgress();
+      addToast('Progress synchronized with cloud', 'success');
+    } catch (err) {
+      addToast('Sync failed — will retry next time', 'warning');
+    }
     setIsSyncing(false);
-    addToast('Local progress aggregated and synchronized', 'success');
   };
 
   return (
@@ -238,13 +248,13 @@ export default function Profile() {
                   margin: '0 auto var(--space-3)',
                 }}
               >
-                {(profile?.display_name || profile?.username || 'A')[0].toUpperCase()}
+                {safeInitial}
               </div>
 
               <div className="font-bold" style={{ fontSize: 'var(--text-lg)' }}>
-                {profile?.display_name || profile?.username}
+                {safeDisplayName}
               </div>
-              <div className="text-sm text-secondary mb-2">@{profile?.username}</div>
+              <div className="text-sm text-secondary mb-2">@{safeUsername}</div>
 
               {profile?.target_gate_year && (
                 <span className="tag mb-3" style={{ background: 'var(--bg-tertiary)' }}>
@@ -283,9 +293,14 @@ export default function Profile() {
 
               <button
                 className="btn btn-ghost btn-sm text-danger mt-6"
-                onClick={signOut}
+                onClick={async () => {
+                  setIsSigningOut(true);
+                  await signOut();
+                  setIsSigningOut(false);
+                }}
+                disabled={isSigningOut}
               >
-                Sign Out
+                {isSigningOut ? 'Signing Out...' : 'Sign Out'}
               </button>
             </div>
           </div>

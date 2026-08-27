@@ -1,6 +1,6 @@
-import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback, ReactNode } from 'react';
 import { User } from '@supabase/supabase-js';
-import { getSupabase, fetchUserProfile, updateUserProfile, updatePrivacySettings } from '../services/supabase';
+import { getSupabase, fetchUserProfile, updateUserProfile, updatePrivacySettings, clearSupabaseSession } from '../services/supabase';
 import { syncLocalProgressToCloud } from '../services/syncProgress';
 import { UserProfile, PrivacySettings } from '../types';
 
@@ -17,6 +17,7 @@ interface AuthContextType {
   updateProfile: (data: Partial<UserProfile>) => Promise<boolean>;
   updatePrivacy: (settings: Partial<PrivacySettings>) => Promise<boolean>;
   syncProgress: () => Promise<void>;
+  refreshProfile: () => Promise<void>;
 }
 
 const DEFAULT_PRIVACY: PrivacySettings = {
@@ -30,6 +31,8 @@ const DEFAULT_PRIVACY: PrivacySettings = {
   share_subject_progress: false,
   visibility: 'public',
 };
+
+const AUTH_INITIALIZED_KEY = 'gate-tracker-auth-initialized';
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
@@ -52,53 +55,140 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     };
   }, []);
 
-  // Initialize session and listen for auth state changes
-  useEffect(() => {
-    const sb = getSupabase();
-
-    sb.auth.getSession().then(({ data: { session } }) => {
-      if (session?.user) {
-        setUser(session.user);
-        loadUserData(session.user.id);
-      } else {
-        setIsLoading(false);
-      }
-    }).catch(err => {
-      console.warn('Auth session check fallback (Local Mode):', err);
-      setIsLoading(false);
-    });
-
-    const { data: { subscription } } = sb.auth.onAuthStateChange(async (_event, session) => {
-      if (session?.user) {
-        setUser(session.user);
-        await loadUserData(session.user.id);
-      } else {
-        setUser(null);
-        setProfile(null);
-        setPrivacySettings(DEFAULT_PRIVACY);
-        setIsLoading(false);
-      }
-    });
-
-    return () => {
-      subscription.unsubscribe();
-    };
+  /**
+   * Persist privacy settings to local SQLite so they survive app restarts
+   * regardless of network connectivity.
+   */
+  const savePrivacyLocally = useCallback(async (settings: PrivacySettings) => {
+    try {
+      await window.electronAPI.privacy.set(settings);
+    } catch (err) {
+      console.warn('Failed to save privacy settings locally:', err);
+    }
   }, []);
 
-  const loadUserData = async (userId: string) => {
+  /**
+   * Load privacy settings from local SQLite cache.
+   * Returns null if not found (first run or migration hasn't run yet).
+   */
+  const loadPrivacyLocally = useCallback(async (): Promise<PrivacySettings | null> => {
     try {
-      const p = await fetchUserProfile(userId);
-      if (p) {
-        setProfile(p);
-        if (p.privacy) {
-          setPrivacySettings(p.privacy);
-        }
+      const local = await window.electronAPI.privacy.get();
+      if (local) {
+        return { ...DEFAULT_PRIVACY, ...local };
       }
     } catch (err) {
-      console.warn('Could not load user data from cloud:', err);
-    } finally {
-      setIsLoading(false);
+      console.warn('Failed to load local privacy settings:', err);
     }
+    return null;
+  }, []);
+
+  // Initialize session and listen for auth state changes
+  useEffect(() => {
+    const initAuth = async () => {
+      // === CRITICAL FIX: Clear bundled auth session on first launch ===
+      // When the app is packaged, the build machine's Supabase auth tokens
+      // may be persisted in localStorage. On a fresh install, we clear them
+      // so new users don't inherit the developer's session.
+      try {
+        const isInitialized = localStorage.getItem(AUTH_INITIALIZED_KEY);
+        if (!isInitialized) {
+          console.log('First launch detected — clearing any bundled auth session.');
+          clearSupabaseSession();
+          localStorage.setItem(AUTH_INITIALIZED_KEY, 'true');
+        }
+      } catch (_) {
+        // localStorage may be unavailable
+      }
+
+      // Load local privacy settings immediately (no network needed)
+      const localPrivacy = await loadPrivacyLocally();
+      if (localPrivacy) {
+        setPrivacySettings(localPrivacy);
+      }
+
+      const sb = getSupabase();
+
+      sb.auth.getSession().then(({ data: { session } }) => {
+        if (session?.user) {
+          setUser(session.user);
+          loadUserData(session.user.id, session.user);
+        } else {
+          setIsLoading(false);
+        }
+      }).catch(err => {
+        console.warn('Auth session check fallback (Local Mode):', err);
+        setIsLoading(false);
+      });
+
+      const { data: { subscription } } = sb.auth.onAuthStateChange(async (_event, session) => {
+        if (session?.user) {
+          setUser(session.user);
+          await loadUserData(session.user.id, session.user);
+        } else {
+          setUser(null);
+          setProfile(null);
+          setPrivacySettings(DEFAULT_PRIVACY);
+          setIsLoading(false);
+        }
+      });
+
+      return () => {
+        subscription.unsubscribe();
+      };
+    };
+
+    initAuth();
+  }, []);
+
+  const loadUserData = async (userId: string, authUser?: User | null) => {
+    const MAX_RETRIES = 3;
+    let lastError: any = null;
+
+    for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
+      try {
+        const p = await fetchUserProfile(userId);
+        if (p) {
+          setProfile(p);
+          if (p.privacy) {
+            const mergedPrivacy = { ...DEFAULT_PRIVACY, ...p.privacy };
+            setPrivacySettings(mergedPrivacy);
+            // Persist cloud privacy settings locally for offline access
+            savePrivacyLocally(mergedPrivacy);
+          }
+          setIsLoading(false);
+          return; // Success — exit early
+        }
+      } catch (err) {
+        lastError = err;
+        console.warn(`Profile load attempt ${attempt + 1}/${MAX_RETRIES} failed:`, err);
+      }
+
+      // Exponential backoff: 500ms, 1500ms, 3500ms
+      if (attempt < MAX_RETRIES - 1) {
+        await new Promise(r => setTimeout(r, 500 * Math.pow(2, attempt)));
+      }
+    }
+
+    // All retries exhausted — build a fallback profile from user_metadata
+    console.warn('All profile load retries failed, using user_metadata fallback:', lastError);
+    const resolvedUser = authUser || user;
+    const meta = resolvedUser?.user_metadata;
+    if (meta) {
+      setProfile({
+        id: userId,
+        username: meta.username || resolvedUser?.email?.split('@')[0] || 'user',
+        display_name: meta.display_name || meta.username || resolvedUser?.email?.split('@')[0] || 'GATE Aspirant',
+        avatar_url: meta.avatar_url || null,
+        bio: null,
+        target_gate_year: meta.target_gate_year || null,
+        target_score: null,
+        created_at: resolvedUser?.created_at || new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      });
+    }
+    // Even if cloud failed, local privacy settings were already loaded in initAuth
+    setIsLoading(false);
   };
 
   const signIn = async (email: string, password: string): Promise<{ error?: string }> => {
@@ -111,7 +201,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (error) return { error: error.message };
       if (data.user) {
         setUser(data.user);
-        await loadUserData(data.user.id);
+        await loadUserData(data.user.id, data.user);
       }
       return {};
     } catch (err: any) {
@@ -153,7 +243,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
       if (data.user) {
         setUser(data.user);
-        await loadUserData(data.user.id);
+        await loadUserData(data.user.id, data.user);
       }
       return {};
     } catch (err: any) {
@@ -165,16 +255,28 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   const signOut = async () => {
+    // Always clear state first so the UI updates immediately
+    setUser(null);
+    setProfile(null);
+    setPrivacySettings(DEFAULT_PRIVACY);
+
+    // Clear local privacy cache on sign-out
+    savePrivacyLocally(DEFAULT_PRIVACY);
+
     try {
       const sb = getSupabase();
       await sb.auth.signOut();
     } catch (err) {
-      console.error('Sign out error:', err);
-    } finally {
-      setUser(null);
-      setProfile(null);
-      setPrivacySettings(DEFAULT_PRIVACY);
+      console.error('Sign out error (may be offline):', err);
     }
+
+    // Clear all Supabase auth tokens and reset the client instance.
+    // Also remove the auth-initialized flag so if a different user installs
+    // the app later, they won't inherit any session.
+    clearSupabaseSession();
+    try {
+      localStorage.removeItem(AUTH_INITIALIZED_KEY);
+    } catch (_) {}
   };
 
   const handleUpdateProfile = async (data: Partial<UserProfile>): Promise<boolean> => {
@@ -188,18 +290,31 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const handleUpdatePrivacy = async (settings: Partial<PrivacySettings>): Promise<boolean> => {
     if (!user) return false;
+    const merged = { ...privacySettings, ...settings };
+
+    // Save locally FIRST for instant persistence
+    savePrivacyLocally(merged);
+    setPrivacySettings(merged);
+
+    // Then sync to cloud
     const ok = await updatePrivacySettings(user.id, settings);
     if (ok) {
-      setPrivacySettings(prev => ({ ...prev, ...settings }));
       // Trigger cloud progress sync with new privacy settings
-      syncLocalProgressToCloud(user.id, { ...privacySettings, ...settings }).catch(() => {});
+      syncLocalProgressToCloud(user.id, merged).catch(() => {});
     }
     return ok;
   };
 
+  const handleRefreshProfile = useCallback(async () => {
+    if (!user) return;
+    await loadUserData(user.id, user);
+  }, [user]);
+
   const handleSyncProgress = async () => {
     if (!user) return;
     await syncLocalProgressToCloud(user.id, privacySettings);
+    // Re-fetch profile data from cloud to display the actual synced values
+    await loadUserData(user.id, user);
   };
 
   return (
@@ -217,6 +332,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         updateProfile: handleUpdateProfile,
         updatePrivacy: handleUpdatePrivacy,
         syncProgress: handleSyncProgress,
+        refreshProfile: handleRefreshProfile,
       }}
     >
       {children}

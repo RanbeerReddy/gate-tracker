@@ -102,7 +102,7 @@ export default function People() {
                 color: isOnline ? 'var(--success)' : 'var(--text-tertiary)',
               }}
             >
-              {isOnline ? '🟢 Online' : '⚪ Offline'}
+              {isOnline ? '🟢 Connected' : '⚪ No Network'}
             </span>
           </div>
         </div>

@@ -9,17 +9,18 @@ import {
   Friendship,
 } from '../types';
 
-// Supabase project configuration from environment variables
+// Supabase project configuration from environment variables ONLY.
+// No hardcoded fallbacks — prevents bundling developer credentials into the package.
 const SUPABASE_URL =
   (import.meta as any).env?.NEXT_PUBLIC_SUPABASE_URL ||
   (import.meta as any).env?.VITE_SUPABASE_URL ||
-  'https://gate-tracker-social.supabase.co';
+  '';
 
 const SUPABASE_ANON_KEY =
   (import.meta as any).env?.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY ||
   (import.meta as any).env?.NEXT_PUBLIC_SUPABASE_ANON_KEY ||
   (import.meta as any).env?.VITE_SUPABASE_ANON_KEY ||
-  'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.dummy_anon_key_for_offline_resilience';
+  '';
 
 let supabaseClient: SupabaseClient | null = null;
 
@@ -35,6 +36,24 @@ export function getSupabase(): SupabaseClient {
     });
   }
   return supabaseClient;
+}
+
+/**
+ * Clears all Supabase auth tokens from localStorage and resets the client instance.
+ * Used on first launch to prevent inheriting a bundled auth session from the build machine,
+ * and after sign-out to ensure a completely clean state.
+ */
+export function clearSupabaseSession(): void {
+  try {
+    const keysToRemove = Object.keys(localStorage).filter(
+      k => k.startsWith('sb-') && (k.endsWith('-auth-token') || k.includes('supabase'))
+    );
+    keysToRemove.forEach(k => localStorage.removeItem(k));
+  } catch (_) {
+    // localStorage may be unavailable
+  }
+  // Reset the client so it doesn't hold a stale session in memory
+  supabaseClient = null;
 }
 
 // ==========================================

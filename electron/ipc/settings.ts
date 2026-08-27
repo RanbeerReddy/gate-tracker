@@ -115,4 +115,48 @@ export function registerSettingsHandlers(): void {
     
     log('First-run setup completed.');
   });
+
+  // Privacy Settings (local SQLite cache)
+  ipcMain.handle('privacy:get', () => {
+    try {
+      const row = db.prepare('SELECT * FROM privacy_settings_local WHERE id = 1').get() as any;
+      if (!row) return null;
+      return {
+        share_profile: !!row.share_profile,
+        share_calendar: !!row.share_calendar,
+        share_study_hours: !!row.share_study_hours,
+        share_question_stats: !!row.share_question_stats,
+        share_syllabus_progress: !!row.share_syllabus_progress,
+        share_mock_performance: !!row.share_mock_performance,
+        share_subject_progress: !!row.share_subject_progress,
+        visibility: row.visibility || 'public',
+      };
+    } catch (err) {
+      log('Error reading local privacy settings', err);
+      return null;
+    }
+  });
+
+  ipcMain.handle('privacy:set', (_e, settings: any) => {
+    try {
+      db.prepare(`
+        INSERT OR REPLACE INTO privacy_settings_local 
+        (id, share_profile, share_calendar, share_study_hours, share_question_stats,
+         share_syllabus_progress, share_mock_performance, share_subject_progress,
+         visibility, updated_at)
+        VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+      `).run(
+        settings.share_profile ? 1 : 0,
+        settings.share_calendar ? 1 : 0,
+        settings.share_study_hours ? 1 : 0,
+        settings.share_question_stats ? 1 : 0,
+        settings.share_syllabus_progress ? 1 : 0,
+        settings.share_mock_performance ? 1 : 0,
+        settings.share_subject_progress ? 1 : 0,
+        settings.visibility || 'public',
+      );
+    } catch (err) {
+      log('Error saving local privacy settings', err);
+    }
+  });
 }
