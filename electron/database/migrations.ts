@@ -289,6 +289,28 @@ const MIGRATIONS = [
       INSERT OR IGNORE INTO privacy_settings_local (id) VALUES (1);
     `,
   },
+  {
+    version: 4,
+    name: 'multi_user_privacy_scoping',
+    up: `
+      -- Multi-user privacy cache to isolate privacy settings when multiple accounts use the app
+      CREATE TABLE IF NOT EXISTS user_privacy_cache (
+        user_id TEXT PRIMARY KEY,
+        share_profile INTEGER NOT NULL DEFAULT 0,
+        share_calendar INTEGER NOT NULL DEFAULT 0,
+        share_study_hours INTEGER NOT NULL DEFAULT 0,
+        share_question_stats INTEGER NOT NULL DEFAULT 0,
+        share_syllabus_progress INTEGER NOT NULL DEFAULT 0,
+        share_mock_performance INTEGER NOT NULL DEFAULT 0,
+        share_subject_progress INTEGER NOT NULL DEFAULT 0,
+        visibility TEXT NOT NULL DEFAULT 'public',
+        updated_at TEXT DEFAULT (datetime('now'))
+      );
+
+      -- Populate local default row
+      INSERT OR IGNORE INTO user_privacy_cache (user_id) VALUES ('local');
+    `,
+  },
 ];
 
 export function runMigrations(): void {
