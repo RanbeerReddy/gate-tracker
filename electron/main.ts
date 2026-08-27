@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, dialog, shell, Menu } from 'electron';
+import { app, BrowserWindow, ipcMain, dialog, shell, Menu, powerMonitor } from 'electron';
 import path from 'path';
 import { initDatabase, closeDatabase, getDatabase } from './database/connection';
 import { runMigrations } from './database/migrations';
@@ -8,6 +8,7 @@ import { log } from './utils/logger';
 import { getAppDataPath } from './utils/paths';
 
 let mainWindow: BrowserWindow | null = null;
+let suspendTimestamp: number | null = null;
 
 const VITE_DEV_SERVER_URL = process.env.VITE_DEV_SERVER_URL;
 
@@ -102,6 +103,21 @@ app.whenReady().then(async () => {
     registerAllHandlers();
     
     createWindow();
+
+    // Power monitor: Sleep & Suspend handling to prevent inflating timer study hours
+    powerMonitor.on('suspend', () => {
+      suspendTimestamp = Date.now();
+      log('System sleep / suspend detected.');
+      mainWindow?.webContents.send('power:suspend');
+    });
+
+    powerMonitor.on('resume', () => {
+      const now = Date.now();
+      const sleepDurationSeconds = suspendTimestamp ? Math.max(0, Math.floor((now - suspendTimestamp) / 1000)) : 0;
+      suspendTimestamp = null;
+      log(`System woke from sleep. Duration: ${sleepDurationSeconds}s`);
+      mainWindow?.webContents.send('power:resume', sleepDurationSeconds);
+    });
     
     log('GATE Tracker started successfully.');
   } catch (err) {
