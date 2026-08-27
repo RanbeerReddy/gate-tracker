@@ -53,6 +53,7 @@ export default function Settings() {
       addToast(result.error, 'error');
     } else {
       addToast(result.message || 'Backup restored', 'success');
+      loadData();
     }
   };
 
@@ -73,6 +74,7 @@ export default function Settings() {
       addToast(result.error, 'error');
     } else {
       addToast('Data imported successfully', 'success');
+      loadData();
     }
   };
 
