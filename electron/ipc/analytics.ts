@@ -1,11 +1,13 @@
 import { ipcMain } from 'electron';
 import { getDatabase } from '../database/connection';
+import { formatLocalDate, getStartOfWeek } from '../utils/dates';
 
 export function registerAnalyticsHandlers(): void {
   const db = getDatabase();
 
   ipcMain.handle('analytics:getDashboard', () => {
-    const today = new Date().toISOString().slice(0, 10);
+    const today = formatLocalDate(new Date());
+    const weekStart = getStartOfWeek(new Date());
     
     // Today's stats
     const todayStudy = db.prepare(`
@@ -29,20 +31,20 @@ export function registerAnalyticsHandlers(): void {
       WHERE date(ss.start_time) = ? AND ss.is_active = 0
     `).all(today);
 
-    // Week stats
+    // Current Week stats (Monday -> Sunday calendar week)
     const weekStudy = db.prepare(`
       SELECT COALESCE(SUM(duration_seconds), 0) as total_seconds,
         COUNT(DISTINCT date(start_time)) as days_studied,
         COUNT(*) as session_count
       FROM study_sessions
-      WHERE start_time >= datetime('now', '-7 days') AND is_active = 0
-    `).get() as any;
+      WHERE date(start_time) >= ? AND is_active = 0
+    `).get(weekStart) as any;
 
     const weekQuestions = db.prepare(`
       SELECT COUNT(*) as total,
         COUNT(CASE WHEN is_correct = 1 THEN 1 END) as correct
-      FROM questions WHERE created_at >= datetime('now', '-7 days')
-    `).get() as any;
+      FROM questions WHERE date(created_at) >= ?
+    `).get(weekStart) as any;
 
     // Syllabus completion
     const syllabusStats = db.prepare(`
