@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Revision, Subject, Topic } from '../types';
 import { useToast } from '../contexts/ToastContext';
+import { formatLocalDate } from '../utils/dateUtils';
 
 export default function RevisionPage() {
   const [dueRevisions, setDueRevisions] = useState<Revision[]>([]);
@@ -128,7 +129,7 @@ export default function RevisionPage() {
                 <tr key={r.id}>
                   <td className="font-medium">{r.topic_name}</td>
                   <td><span className="flex items-center gap-2"><span className="color-dot" style={{ background: r.subject_color }} />{r.subject_name}</span></td>
-                  <td className={r.next_revision_date && r.next_revision_date <= new Date().toISOString().slice(0, 10) ? 'text-warning font-medium' : 'text-sm'}>
+                  <td className={r.next_revision_date && r.next_revision_date <= formatLocalDate(new Date()) ? 'text-warning font-medium' : 'text-sm'}>
                     {r.next_revision_date || '—'}
                   </td>
                   <td className="text-sm">{r.revision_number}</td>

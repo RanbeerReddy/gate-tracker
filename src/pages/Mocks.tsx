@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { MockTest, Subject } from '../types';
 import { useToast } from '../contexts/ToastContext';
+import { formatLocalDate, parseLocalDate } from '../utils/dateUtils';
 
 export default function Mocks() {
   const [mocks, setMocks] = useState<MockTest[]>([]);
@@ -9,7 +10,7 @@ export default function Mocks() {
   const { addToast } = useToast();
 
   const [form, setForm] = useState({
-    date: new Date().toISOString().slice(0, 10), test_name: '', total_marks: '100',
+    date: formatLocalDate(new Date()), test_name: '', total_marks: '100',
     score: '', attempted: '', correct: '', wrong: '', unattempted: '',
     negative_marks: '0', time_minutes: '', notes: '',
   });
@@ -101,7 +102,7 @@ export default function Mocks() {
             <tbody>
               {mocks.map(m => (
                 <tr key={m.id}>
-                  <td className="text-sm">{new Date(m.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</td>
+                  <td className="text-sm">{parseLocalDate(m.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</td>
                   <td className="font-medium">{m.test_name}</td>
                   <td className="font-semibold">{m.score}/{m.total_marks}</td>
                   <td className="text-sm">{m.attempted}</td>

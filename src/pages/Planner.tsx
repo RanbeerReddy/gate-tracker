@@ -1,9 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import { PlannedSession, Subject, Topic, ACTIVITY_TYPES, ActivityType } from '../types';
 import { useToast } from '../contexts/ToastContext';
+import { formatLocalDate, parseLocalDate } from '../utils/dateUtils';
 
 export default function Planner() {
-  const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
+  const [date, setDate] = useState(formatLocalDate(new Date()));
   const [planned, setPlanned] = useState<PlannedSession[]>([]);
   const [subjects, setSubjects] = useState<Subject[]>([]);
   const [showAdd, setShowAdd] = useState(false);
@@ -56,12 +57,12 @@ export default function Planner() {
   };
 
   const changeDate = (offset: number) => {
-    const d = new Date(date);
+    const d = parseLocalDate(date);
     d.setDate(d.getDate() + offset);
-    setDate(d.toISOString().slice(0, 10));
+    setDate(formatLocalDate(d));
   };
 
-  const isToday = date === new Date().toISOString().slice(0, 10);
+  const isToday = date === formatLocalDate(new Date());
 
   return (
     <div className="page">
@@ -74,7 +75,7 @@ export default function Planner() {
               <input type="date" className="form-input" value={date} onChange={e => setDate(e.target.value)}
                 style={{ width: '160px', textAlign: 'center' }} />
               <button className="btn btn-ghost btn-sm" onClick={() => changeDate(1)}>→</button>
-              {!isToday && <button className="btn btn-ghost btn-sm" onClick={() => setDate(new Date().toISOString().slice(0, 10))}>Today</button>}
+              {!isToday && <button className="btn btn-ghost btn-sm" onClick={() => setDate(formatLocalDate(new Date()))}>Today</button>}
             </div>
           </div>
           <button className="btn btn-primary" onClick={() => setShowAdd(true)}>+ Add Block</button>
