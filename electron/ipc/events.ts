@@ -1,6 +1,7 @@
 import { ipcMain } from 'electron';
 import { getDatabase } from '../database/connection';
 import { log } from '../utils/logger';
+import { calculateDaysRemaining } from '../utils/dates';
 
 export function registerEventHandlers(): void {
   const db = getDatabase();
@@ -101,20 +102,14 @@ export function registerEventHandlers(): void {
     const examDate = examEvent?.event_date || dateSetting?.value || '2027-02-07';
     const examName = examEvent?.name || nameSetting?.value || 'GATE CSE 2027';
 
-    // Calculate days remaining
-    const now = new Date();
-    now.setHours(0, 0, 0, 0);
-    const target = new Date(examDate);
-    target.setHours(0, 0, 0, 0);
-
-    const diffTime = target.getTime() - now.getTime();
-    const daysRemaining = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+    // Calculate days remaining without UTC drift
+    const { daysRemaining, isPast } = calculateDaysRemaining(examDate);
 
     return {
       examDate,
       examName,
-      daysRemaining: Math.max(0, daysRemaining),
-      isPast: daysRemaining < 0,
+      daysRemaining,
+      isPast,
       event: examEvent || null,
     };
   });
