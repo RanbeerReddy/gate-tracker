@@ -59,21 +59,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
    * Persist privacy settings to local SQLite so they survive app restarts
    * regardless of network connectivity.
    */
-  const savePrivacyLocally = useCallback(async (settings: PrivacySettings) => {
+  const savePrivacyLocally = useCallback(async (settings: PrivacySettings, targetUserId?: string) => {
     try {
-      await window.electronAPI.privacy.set(settings);
+      await window.electronAPI.privacy.set(settings, targetUserId || user?.id || 'local');
     } catch (err) {
       console.warn('Failed to save privacy settings locally:', err);
     }
-  }, []);
+  }, [user]);
 
   /**
    * Load privacy settings from local SQLite cache.
    * Returns null if not found (first run or migration hasn't run yet).
    */
-  const loadPrivacyLocally = useCallback(async (): Promise<PrivacySettings | null> => {
+  const loadPrivacyLocally = useCallback(async (targetUserId?: string): Promise<PrivacySettings | null> => {
     try {
-      const local = await window.electronAPI.privacy.get();
+      const local = await window.electronAPI.privacy.get(targetUserId || user?.id || 'local');
       if (local) {
         return { ...DEFAULT_PRIVACY, ...local };
       }
@@ -81,7 +81,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       console.warn('Failed to load local privacy settings:', err);
     }
     return null;
-  }, []);
+  }, [user]);
 
   // Initialize session and listen for auth state changes
   useEffect(() => {
@@ -260,8 +260,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setProfile(null);
     setPrivacySettings(DEFAULT_PRIVACY);
 
-    // Clear local privacy cache on sign-out
-    savePrivacyLocally(DEFAULT_PRIVACY);
+    // Restore unauthenticated local privacy settings
+    try {
+      const localPrivacy = await loadPrivacyLocally('local');
+      if (localPrivacy) {
+        setPrivacySettings(localPrivacy);
+      }
+    } catch (_) {}
 
     try {
       const sb = getSupabase();
@@ -270,9 +275,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       console.error('Sign out error (may be offline):', err);
     }
 
-    // Clear all Supabase auth tokens and reset the client instance.
-    // Also remove the auth-initialized flag so if a different user installs
-    // the app later, they won't inherit any session.
+    // Clear all Supabase auth tokens and reset client instance.
     clearSupabaseSession();
     try {
       localStorage.removeItem(AUTH_INITIALIZED_KEY);
