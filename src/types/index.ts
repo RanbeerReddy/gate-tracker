@@ -551,8 +551,12 @@ export interface ElectronAPI {
     complete: (data: any) => Promise<void>;
   };
   privacy: {
-    get: () => Promise<Omit<PrivacySettings, 'user_id' | 'updated_at'> | null>;
-    set: (settings: Partial<PrivacySettings>) => Promise<void>;
+    get: (userId?: string) => Promise<Omit<PrivacySettings, 'user_id' | 'updated_at'> | null>;
+    set: (settings: Partial<PrivacySettings>, userId?: string) => Promise<void>;
+  };
+  power: {
+    onSuspend: (callback: () => void) => () => void;
+    onResume: (callback: (durationSeconds: number) => void) => () => void;
   };
   onForceSaveSession: (callback: () => void) => () => void;
 }

@@ -116,10 +116,21 @@ export function registerSettingsHandlers(): void {
     log('First-run setup completed.');
   });
 
-  // Privacy Settings (local SQLite cache)
-  ipcMain.handle('privacy:get', () => {
+  // Privacy Settings (local SQLite cache, scoped per user)
+  ipcMain.handle('privacy:get', (_e, userId?: string) => {
     try {
-      const row = db.prepare('SELECT * FROM privacy_settings_local WHERE id = 1').get() as any;
+      const targetUserId = userId || 'local';
+      let row = db.prepare('SELECT * FROM user_privacy_cache WHERE user_id = ?').get(targetUserId) as any;
+      if (!row && targetUserId !== 'local') {
+        // Fallback to local row if specific user hasn't set one yet
+        row = db.prepare('SELECT * FROM user_privacy_cache WHERE user_id = ?').get('local') as any;
+      }
+      if (!row) {
+        // Check old table if present
+        try {
+          row = db.prepare('SELECT * FROM privacy_settings_local WHERE id = 1').get() as any;
+        } catch (_) {}
+      }
       if (!row) return null;
       return {
         share_profile: !!row.share_profile,
@@ -137,23 +148,28 @@ export function registerSettingsHandlers(): void {
     }
   });
 
-  ipcMain.handle('privacy:set', (_e, settings: any) => {
+  ipcMain.handle('privacy:set', (_e, { userId, settings }: { userId?: string; settings: any } | any) => {
     try {
+      // Support both { userId, settings } and direct settings object
+      const actualSettings = settings?.share_profile !== undefined ? settings : (userId?.share_profile !== undefined ? userId : settings);
+      const targetUserId = (typeof userId === 'string' && userId.length > 0) ? userId : 'local';
+
       db.prepare(`
-        INSERT OR REPLACE INTO privacy_settings_local 
-        (id, share_profile, share_calendar, share_study_hours, share_question_stats,
+        INSERT OR REPLACE INTO user_privacy_cache 
+        (user_id, share_profile, share_calendar, share_study_hours, share_question_stats,
          share_syllabus_progress, share_mock_performance, share_subject_progress,
          visibility, updated_at)
-        VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
       `).run(
-        settings.share_profile ? 1 : 0,
-        settings.share_calendar ? 1 : 0,
-        settings.share_study_hours ? 1 : 0,
-        settings.share_question_stats ? 1 : 0,
-        settings.share_syllabus_progress ? 1 : 0,
-        settings.share_mock_performance ? 1 : 0,
-        settings.share_subject_progress ? 1 : 0,
-        settings.visibility || 'public',
+        targetUserId,
+        actualSettings.share_profile ? 1 : 0,
+        actualSettings.share_calendar ? 1 : 0,
+        actualSettings.share_study_hours ? 1 : 0,
+        actualSettings.share_question_stats ? 1 : 0,
+        actualSettings.share_syllabus_progress ? 1 : 0,
+        actualSettings.share_mock_performance ? 1 : 0,
+        actualSettings.share_subject_progress ? 1 : 0,
+        actualSettings.visibility || 'public',
       );
     } catch (err) {
       log('Error saving local privacy settings', err);

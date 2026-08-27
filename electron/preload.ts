@@ -155,8 +155,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   // Privacy Settings (local cache)
   privacy: {
-    get: () => ipcRenderer.invoke('privacy:get'),
-    set: (settings: any) => ipcRenderer.invoke('privacy:set', settings),
+    get: (userId?: string) => ipcRenderer.invoke('privacy:get', userId),
+    set: (settings: any, userId?: string) => ipcRenderer.invoke('privacy:set', { userId, settings }),
   },
 
   // Calendar & Exam Events
@@ -167,6 +167,20 @@ contextBridge.exposeInMainWorld('electronAPI', {
     update: (id: number, data: any) => ipcRenderer.invoke('events:update', id, data),
     delete: (id: number) => ipcRenderer.invoke('events:delete', id),
     getExamInfo: () => ipcRenderer.invoke('events:getExamInfo'),
+  },
+
+  // Power / Sleep monitor
+  power: {
+    onSuspend: (callback: () => void) => {
+      const handler = () => callback();
+      ipcRenderer.on('power:suspend', handler);
+      return () => ipcRenderer.removeListener('power:suspend', handler);
+    },
+    onResume: (callback: (durationSeconds: number) => void) => {
+      const handler = (_e: any, duration: number) => callback(duration);
+      ipcRenderer.on('power:resume', handler);
+      return () => ipcRenderer.removeListener('power:resume', handler);
+    },
   },
 
   // Events from main process
