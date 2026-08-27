@@ -169,8 +169,12 @@ export function importData(filepath: string): { importedCounts: Record<string, n
     const content = fs.readFileSync(filepath, 'utf-8');
     const data = JSON.parse(content);
     
+    if (!data || typeof data !== 'object' || Array.isArray(data)) {
+      throw new Error('Invalid backup file: content is not a valid JSON object.');
+    }
+
     if (!data.version || !data.export_date) {
-      throw new Error('Invalid GATE Tracker backup format.');
+      throw new Error('Invalid GATE Tracker backup format: missing version or export_date.');
     }
 
     const importTransaction = db.transaction(() => {

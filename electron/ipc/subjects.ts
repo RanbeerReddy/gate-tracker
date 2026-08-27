@@ -10,7 +10,7 @@ export function registerSubjectHandlers(): void {
       SELECT s.*, 
         (SELECT COUNT(*) FROM topics WHERE subject_id = s.id) as topic_count,
         (SELECT COUNT(*) FROM topics WHERE subject_id = s.id AND status = 'completed') as completed_topics,
-        (SELECT COALESCE(SUM(duration_seconds), 0) FROM study_sessions WHERE subject_id = s.id) as total_study_seconds,
+        (SELECT COALESCE(SUM(duration_seconds), 0) FROM study_sessions WHERE subject_id = s.id AND is_active = 0) as total_study_seconds,
         (SELECT COUNT(*) FROM questions WHERE subject_id = s.id) as total_questions,
         (SELECT COUNT(*) FROM questions WHERE subject_id = s.id AND is_correct = 1) as correct_questions
       FROM subjects s 
@@ -24,7 +24,7 @@ export function registerSubjectHandlers(): void {
       SELECT s.*,
         (SELECT COUNT(*) FROM topics WHERE subject_id = s.id) as topic_count,
         (SELECT COUNT(*) FROM topics WHERE subject_id = s.id AND status = 'completed') as completed_topics,
-        (SELECT COALESCE(SUM(duration_seconds), 0) FROM study_sessions WHERE subject_id = s.id) as total_study_seconds,
+        (SELECT COALESCE(SUM(duration_seconds), 0) FROM study_sessions WHERE subject_id = s.id AND is_active = 0) as total_study_seconds,
         (SELECT COUNT(*) FROM questions WHERE subject_id = s.id) as total_questions,
         (SELECT COUNT(*) FROM questions WHERE subject_id = s.id AND is_correct = 1) as correct_questions
       FROM subjects s WHERE s.id = ?
@@ -68,7 +68,7 @@ export function registerSubjectHandlers(): void {
     return db.prepare(`
       SELECT t.*,
         (SELECT COUNT(*) FROM subtopics WHERE topic_id = t.id) as subtopic_count,
-        (SELECT COALESCE(SUM(duration_seconds), 0) FROM study_sessions WHERE topic_id = t.id) as total_study_seconds,
+        (SELECT COALESCE(SUM(duration_seconds), 0) FROM study_sessions WHERE topic_id = t.id AND is_active = 0) as total_study_seconds,
         (SELECT COUNT(*) FROM questions WHERE topic_id = t.id) as total_questions,
         (SELECT COUNT(*) FROM questions WHERE topic_id = t.id AND is_correct = 1) as correct_questions,
         (SELECT MAX(revision_date) FROM revisions WHERE topic_id = t.id) as last_revision,
@@ -84,7 +84,7 @@ export function registerSubjectHandlers(): void {
     return db.prepare(`
       SELECT t.*, s.name as subject_name, s.color as subject_color,
         (SELECT COUNT(*) FROM subtopics WHERE topic_id = t.id) as subtopic_count,
-        (SELECT COALESCE(SUM(duration_seconds), 0) FROM study_sessions WHERE topic_id = t.id) as total_study_seconds,
+        (SELECT COALESCE(SUM(duration_seconds), 0) FROM study_sessions WHERE topic_id = t.id AND is_active = 0) as total_study_seconds,
         (SELECT COUNT(*) FROM questions WHERE topic_id = t.id) as total_questions,
         (SELECT COUNT(*) FROM questions WHERE topic_id = t.id AND is_correct = 1) as correct_questions,
         (SELECT MAX(revision_date) FROM revisions WHERE topic_id = t.id) as last_revision,

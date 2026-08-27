@@ -200,6 +200,8 @@ export function TimerProvider({ children }: { children: React.ReactNode }) {
     subjectName: string;
     topicName?: string;
   }) => {
+    if (timer.isRunning) return;
+
     const session = await window.electronAPI.sessions.start({
       subject_id: data.subjectId,
       topic_id: data.topicId || null,
@@ -223,18 +225,22 @@ export function TimerProvider({ children }: { children: React.ReactNode }) {
       subjectName: data.subjectName,
       topicName: data.topicName || '',
     });
-  }, []);
+  }, [timer.isRunning]);
 
   const pauseSession = useCallback(() => {
-    setTimer(prev => ({
-      ...prev,
-      isPaused: true,
-      pauseStart: Date.now(),
-    }));
+    setTimer(prev => {
+      if (!prev.isRunning || prev.isPaused) return prev;
+      return {
+        ...prev,
+        isPaused: true,
+        pauseStart: Date.now(),
+      };
+    });
   }, []);
 
   const resumeSession = useCallback(() => {
     setTimer(prev => {
+      if (!prev.isRunning || !prev.isPaused) return prev;
       const pauseDuration = prev.pauseStart ? Math.floor((Date.now() - prev.pauseStart) / 1000) : 0;
       return {
         ...prev,
@@ -246,7 +252,7 @@ export function TimerProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const finishSession = useCallback(async (data?: { notes?: string; questions_solved?: number; focus_rating?: number }) => {
-    if (!timer.sessionId) return null;
+    if (!timer.sessionId || !timer.isRunning) return null;
 
     // If paused, add pause time
     let totalPause = timer.totalPauseTime;
@@ -255,8 +261,8 @@ export function TimerProvider({ children }: { children: React.ReactNode }) {
     }
 
     const session = await window.electronAPI.sessions.finish(timer.sessionId, {
-      duration_seconds: timer.elapsed,
-      pause_duration_seconds: totalPause,
+      duration_seconds: Math.max(0, timer.elapsed),
+      pause_duration_seconds: Math.max(0, totalPause),
       notes: data?.notes || null,
       questions_solved: data?.questions_solved || 0,
       focus_rating: data?.focus_rating || null,

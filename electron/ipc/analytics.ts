@@ -64,9 +64,7 @@ export function registerAnalyticsHandlers(): void {
       SELECT s.id, s.name, s.color,
         COUNT(t.id) as total_topics,
         COUNT(CASE WHEN t.status IN ('completed', 'strong') THEN 1 END) as completed_topics,
-        COALESCE(SUM(
-          (SELECT COALESCE(SUM(duration_seconds), 0) FROM study_sessions WHERE subject_id = s.id)
-        ), 0) as total_seconds
+        (SELECT COALESCE(SUM(duration_seconds), 0) FROM study_sessions WHERE subject_id = s.id AND is_active = 0) as total_seconds
       FROM subjects s
       LEFT JOIN topics t ON t.subject_id = s.id
       WHERE s.is_archived = 0

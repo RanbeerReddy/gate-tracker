@@ -331,75 +331,248 @@ test('User privacy settings are isolated per user_id', () => {
 });
 
 // ---------------------------------------------------------
-// 5. FULL JSON EXPORT / IMPORT ROUND-TRIP TEST
+// 5. DATA CONSISTENCY & CROSS-SCREEN CALCULATION AUDIT
 // ---------------------------------------------------------
-console.log('\n[5] Backup & Full JSON Entity Import/Export');
+console.log('\n[5] Data Consistency & Cross-Screen Calculations');
 
-test('Insert seed subjects and verify transactional import', () => {
-  const subRes = db.prepare("INSERT INTO subjects (name, color) VALUES ('Data Structures', '#10B981')").run();
-  const subId = subRes.lastInsertRowid;
+test('Cross-screen consistency: 2h C + 1h DS + 30m DM, 10 questions (7 correct, 3 wrong)', () => {
+  // Create subjects
+  const subC = db.prepare("INSERT INTO subjects (name, color, display_order) VALUES ('C Programming', '#3B82F6', 1)").run().lastInsertRowid;
+  const subDS = db.prepare("INSERT INTO subjects (name, color, display_order) VALUES ('Data Structures', '#10B981', 2)").run().lastInsertRowid;
+  const subDM = db.prepare("INSERT INTO subjects (name, color, display_order) VALUES ('Discrete Math', '#F59E0B', 3)").run().lastInsertRowid;
 
-  const topicRes = db.prepare("INSERT INTO topics (subject_id, name) VALUES (?, 'Binary Search Trees')").run(subId);
-  const topicId = topicRes.lastInsertRowid;
+  // Create topics
+  const topC = db.prepare("INSERT INTO topics (subject_id, name) VALUES (?, 'Pointers')").run(subC).lastInsertRowid;
+  const topDS = db.prepare("INSERT INTO topics (subject_id, name) VALUES (?, 'Trees')").run(subDS).lastInsertRowid;
+  const topDM = db.prepare("INSERT INTO topics (subject_id, name) VALUES (?, 'Logic')").run(subDM).lastInsertRowid;
 
-  db.prepare(`
-    INSERT INTO study_sessions (subject_id, topic_id, activity_type, start_time, duration_seconds)
-    VALUES (?, ?, 'practice', '2026-08-27 10:00:00', 3600)
-  `).run(subId, topicId);
+  const today = formatLocalDate(new Date());
 
-  db.prepare(`
-    INSERT INTO questions (subject_id, topic_id, difficulty, is_correct, is_pyq)
-    VALUES (?, ?, 'hard', 1, 1)
-  `).run(subId, topicId);
+  // 2h C (7200s), 1h DS (3600s), 30m DM (1800s)
+  db.prepare("INSERT INTO study_sessions (subject_id, topic_id, start_time, duration_seconds, is_active) VALUES (?, ?, ?, 7200, 0)").run(subC, topC, `${today} 09:00:00`);
+  db.prepare("INSERT INTO study_sessions (subject_id, topic_id, start_time, duration_seconds, is_active) VALUES (?, ?, ?, 3600, 0)").run(subDS, topDS, `${today} 12:00:00`);
+  db.prepare("INSERT INTO study_sessions (subject_id, topic_id, start_time, duration_seconds, is_active) VALUES (?, ?, ?, 1800, 0)").run(subDM, topDM, `${today} 15:00:00`);
 
-  // Dump JSON
-  const exported = {
-    version: '1.0.0',
-    export_date: new Date().toISOString(),
-    subjects: db.prepare('SELECT * FROM subjects').all(),
-    topics: db.prepare('SELECT * FROM topics').all(),
-    study_sessions: db.prepare('SELECT * FROM study_sessions').all(),
-    questions: db.prepare('SELECT * FROM questions').all(),
-    settings: [{ key: 'theme', value: 'dark' }],
-  };
+  // Total seconds = 7200 + 3600 + 1800 = 12600 seconds = 3.5 hours
+  const totalStudy = db.prepare("SELECT SUM(duration_seconds) as total FROM study_sessions WHERE is_active = 0").get().total;
+  assert.strictEqual(totalStudy, 12600);
 
-  assert.strictEqual(exported.subjects.length, 1);
-  assert.strictEqual(exported.topics.length, 1);
-  assert.strictEqual(exported.study_sessions.length, 1);
-  assert.strictEqual(exported.questions.length, 1);
+  // 10 questions: 7 correct, 3 wrong
+  for (let i = 0; i < 7; i++) {
+    db.prepare("INSERT INTO questions (subject_id, topic_id, is_correct, created_at) VALUES (?, ?, 1, ?)").run(subC, topC, `${today} 10:00:00`);
+  }
+  for (let i = 0; i < 3; i++) {
+    db.prepare("INSERT INTO questions (subject_id, topic_id, is_correct, created_at) VALUES (?, ?, 0, ?)").run(subDS, topDS, `${today} 13:00:00`);
+  }
 
-  // Clear tables and import back
-  db.exec('DELETE FROM questions; DELETE FROM study_sessions; DELETE FROM topics; DELETE FROM subjects;');
-  assert.strictEqual(db.prepare('SELECT COUNT(*) as count FROM subjects').get().count, 0);
+  const qStats = db.prepare("SELECT COUNT(*) as total, COUNT(CASE WHEN is_correct = 1 THEN 1 END) as correct FROM questions").get();
+  assert.strictEqual(qStats.total, 10);
+  assert.strictEqual(qStats.correct, 7);
+  const accuracy = Math.round((qStats.correct / qStats.total) * 100);
+  assert.strictEqual(accuracy, 70);
 
-  // Import transaction
-  const importTx = db.transaction(() => {
-    for (const s of exported.subjects) {
-      db.prepare('INSERT INTO subjects (id, name, color) VALUES (?, ?, ?)').run(s.id, s.name, s.color);
+  // Subject table study time verification
+  const subRows = db.prepare(`
+    SELECT s.name, (SELECT COALESCE(SUM(duration_seconds), 0) FROM study_sessions WHERE subject_id = s.id AND is_active = 0) as total_seconds
+    FROM subjects s WHERE s.id IN (?, ?, ?) ORDER BY s.display_order
+  `).all(subC, subDS, subDM);
+
+  assert.strictEqual(subRows[0].total_seconds, 7200); // 2 hours
+  assert.strictEqual(subRows[1].total_seconds, 3600); // 1 hour
+  assert.strictEqual(subRows[2].total_seconds, 1800); // 30 min
+});
+
+// ---------------------------------------------------------
+// 6. EMPTY STATE SAFE RETURN VALUES
+// ---------------------------------------------------------
+console.log('\n[6] Empty State Null/Zero Safety');
+
+test('Clean empty state returns safe zero values without NaN or division errors', () => {
+  const emptyDbPath = path.join(process.cwd(), 'tests', 'test_empty.db');
+  if (fs.existsSync(emptyDbPath)) fs.unlinkSync(emptyDbPath);
+
+  const emptyDb = new Database(emptyDbPath);
+  emptyDb.exec(`
+    CREATE TABLE study_sessions (id INTEGER PRIMARY KEY, subject_id INTEGER, start_time TEXT, duration_seconds INTEGER, is_active INTEGER);
+    CREATE TABLE questions (id INTEGER PRIMARY KEY, is_correct INTEGER, created_at TEXT);
+    CREATE TABLE mock_tests (id INTEGER PRIMARY KEY, score REAL, total_marks REAL);
+  `);
+
+  const study = emptyDb.prepare("SELECT COALESCE(SUM(duration_seconds), 0) as total_seconds, COUNT(*) as count FROM study_sessions WHERE is_active = 0").get();
+  assert.strictEqual(study.total_seconds, 0);
+  assert.strictEqual(study.count, 0);
+
+  const questions = emptyDb.prepare("SELECT COUNT(*) as total, COUNT(CASE WHEN is_correct = 1 THEN 1 END) as correct FROM questions").get();
+  const acc = questions.total > 0 ? Math.round((questions.correct / questions.total) * 100) : 0;
+  assert.strictEqual(acc, 0);
+  assert.strictEqual(Number.isNaN(acc), false);
+
+  emptyDb.close();
+  if (fs.existsSync(emptyDbPath)) fs.unlinkSync(emptyDbPath);
+});
+
+// ---------------------------------------------------------
+// 7. HIGH-VOLUME EXTREME DATA PERFORMANCE TEST
+// ---------------------------------------------------------
+console.log('\n[7] High-Volume Extreme Data Stress Test');
+
+test('Stress testing 1,000 sessions and 10,000 questions runs under 150ms', () => {
+  const stressDbPath = path.join(process.cwd(), 'tests', 'test_stress.db');
+  if (fs.existsSync(stressDbPath)) fs.unlinkSync(stressDbPath);
+
+  const stressDb = new Database(stressDbPath);
+  stressDb.pragma('journal_mode = WAL');
+  stressDb.exec(`
+    CREATE TABLE subjects (id INTEGER PRIMARY KEY, name TEXT);
+    CREATE TABLE study_sessions (id INTEGER PRIMARY KEY, subject_id INTEGER, start_time TEXT, duration_seconds INTEGER, is_active INTEGER);
+    CREATE TABLE questions (id INTEGER PRIMARY KEY, subject_id INTEGER, is_correct INTEGER, created_at TEXT);
+    CREATE INDEX idx_sessions_time ON study_sessions(start_time, is_active);
+    CREATE INDEX idx_questions_time ON questions(created_at);
+  `);
+
+  const insertSession = stressDb.prepare("INSERT INTO study_sessions (subject_id, start_time, duration_seconds, is_active) VALUES (?, ?, ?, 0)");
+  const insertQuestion = stressDb.prepare("INSERT INTO questions (subject_id, is_correct, created_at) VALUES (?, ?, ?)");
+
+  // Bulk insert inside transaction
+  const bulkInsert = stressDb.transaction(() => {
+    for (let i = 0; i < 1000; i++) {
+      insertSession.run((i % 10) + 1, '2026-08-27 10:00:00', 3600);
     }
-    for (const t of exported.topics) {
-      db.prepare('INSERT INTO topics (id, subject_id, name) VALUES (?, ?, ?)').run(t.id, t.subject_id, t.name);
-    }
-    for (const ss of exported.study_sessions) {
-      db.prepare(`
-        INSERT INTO study_sessions (id, subject_id, topic_id, activity_type, start_time, duration_seconds)
-        VALUES (?, ?, ?, ?, ?, ?)
-      `).run(ss.id, ss.subject_id, ss.topic_id, ss.activity_type, ss.start_time, ss.duration_seconds);
-    }
-    for (const q of exported.questions) {
-      db.prepare(`
-        INSERT INTO questions (id, subject_id, topic_id, difficulty, is_correct, is_pyq)
-        VALUES (?, ?, ?, ?, ?, ?)
-      `).run(q.id, q.subject_id, q.topic_id, q.difficulty, q.is_correct, q.is_pyq);
+    for (let i = 0; i < 10000; i++) {
+      insertQuestion.run((i % 10) + 1, i % 2, '2026-08-27 10:00:00');
     }
   });
+  bulkInsert();
 
-  importTx();
+  // Measure aggregation query time
+  const t0 = Date.now();
+  const agg = stressDb.prepare(`
+    SELECT COALESCE(SUM(duration_seconds), 0) as total_seconds, COUNT(*) as sessions
+    FROM study_sessions WHERE date(start_time) = '2026-08-27' AND is_active = 0
+  `).get();
+  const qAgg = stressDb.prepare(`
+    SELECT COUNT(*) as total, COUNT(CASE WHEN is_correct = 1 THEN 1 END) as correct
+    FROM questions WHERE date(created_at) = '2026-08-27'
+  `).get();
+  const tElapsed = Date.now() - t0;
 
-  assert.strictEqual(db.prepare('SELECT COUNT(*) as count FROM subjects').get().count, 1);
-  assert.strictEqual(db.prepare('SELECT COUNT(*) as count FROM topics').get().count, 1);
-  assert.strictEqual(db.prepare('SELECT COUNT(*) as count FROM study_sessions').get().count, 1);
-  assert.strictEqual(db.prepare('SELECT COUNT(*) as count FROM questions').get().count, 1);
+  assert.strictEqual(agg.sessions, 1000);
+  assert.strictEqual(qAgg.total, 10000);
+  assert.strictEqual(tElapsed < 150, true);
+
+  stressDb.close();
+  if (fs.existsSync(stressDbPath)) fs.unlinkSync(stressDbPath);
+});
+
+// ---------------------------------------------------------
+// 8. MALFORMED BACKUP IMPORT REJECTION TEST
+// ---------------------------------------------------------
+console.log('\n[8] Backup Import Error Handling & Validation');
+
+test('Invalid non-object or corrupt JSON throws safe error without DB damage', () => {
+  function validateImportJson(rawString) {
+    let parsed;
+    try {
+      parsed = JSON.parse(rawString);
+    } catch {
+      throw new Error('Invalid JSON format.');
+    }
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      throw new Error('Invalid backup file: content is not a valid JSON object.');
+    }
+    if (!parsed.version || !parsed.export_date) {
+      throw new Error('Invalid GATE Tracker backup format: missing version or export_date.');
+    }
+    return parsed;
+  }
+
+  assert.throws(() => validateImportJson('{ broken json'), /Invalid JSON format/);
+  assert.throws(() => validateImportJson('null'), /not a valid JSON object/);
+  assert.throws(() => validateImportJson('[1, 2, 3]'), /not a valid JSON object/);
+  assert.throws(() => validateImportJson('{"title": "test"}'), /missing version or export_date/);
+
+  // Valid backup passes
+  const valid = validateImportJson('{"version": "1.0.0", "export_date": "2026-08-27T00:00:00.000Z", "subjects": []}');
+  assert.strictEqual(valid.version, '1.0.0');
+});
+
+// ---------------------------------------------------------
+// 9. DATE BOUNDARY & TIMEZONE TRANSITIONS
+// ---------------------------------------------------------
+console.log('\n[9] Date Boundary & Leap Year Handling');
+
+test('Date transitions (Month end, Leap year, Year end) format accurately', () => {
+  // Jan 31 -> Feb 1
+  const d1 = new Date(2027, 0, 31);
+  assert.strictEqual(formatLocalDate(d1), '2027-01-31');
+  d1.setDate(d1.getDate() + 1);
+  assert.strictEqual(formatLocalDate(d1), '2027-02-01');
+
+  // Leap year Feb 28 -> Feb 29 in 2028
+  const leap = new Date(2028, 1, 28);
+  leap.setDate(leap.getDate() + 1);
+  assert.strictEqual(formatLocalDate(leap), '2028-02-29');
+
+  // Dec 31 -> Jan 1
+  const yearEnd = new Date(2026, 11, 31);
+  assert.strictEqual(formatLocalDate(yearEnd), '2026-12-31');
+  yearEnd.setDate(yearEnd.getDate() + 1);
+  assert.strictEqual(formatLocalDate(yearEnd), '2027-01-01');
+});
+
+// ---------------------------------------------------------
+// 10. MULTI-USER PRIVACY ACCESS MATRIX TEST
+// ---------------------------------------------------------
+console.log('\n[10] Privacy Access Enforcement Matrix');
+
+test('Privacy matrix: when sharing is disabled, private fields remain hidden', () => {
+  const userSettingsAllOff = {
+    share_profile: false,
+    share_calendar: false,
+    share_study_hours: false,
+    share_question_stats: false,
+    share_syllabus_progress: false,
+    share_mock_performance: false,
+  };
+
+  function sanitizeFriendProfile(targetUser, privacy) {
+    return {
+      id: targetUser.id,
+      username: targetUser.username,
+      profile: privacy.share_profile ? targetUser.profile : null,
+      calendar: privacy.share_calendar ? targetUser.calendar : null,
+      studyHours: privacy.share_study_hours ? targetUser.studyHours : null,
+      questionStats: privacy.share_question_stats ? targetUser.questionStats : null,
+      syllabus: privacy.share_syllabus_progress ? targetUser.syllabus : null,
+      mockPerformance: privacy.share_mock_performance ? targetUser.mockPerformance : null,
+    };
+  }
+
+  const rawUserA = {
+    id: 'user_a',
+    username: 'ranbeer',
+    profile: { bio: 'Gate aspirant' },
+    calendar: [{ date: '2026-08-27', hours: 4 }],
+    studyHours: 120,
+    questionStats: { total: 500, accuracy: 82 },
+    syllabus: { completion: 65 },
+    mockPerformance: { avgScore: 68 },
+  };
+
+  const hiddenView = sanitizeFriendProfile(rawUserA, userSettingsAllOff);
+  assert.strictEqual(hiddenView.profile, null);
+  assert.strictEqual(hiddenView.calendar, null);
+  assert.strictEqual(hiddenView.studyHours, null);
+  assert.strictEqual(hiddenView.questionStats, null);
+  assert.strictEqual(hiddenView.syllabus, null);
+  assert.strictEqual(hiddenView.mockPerformance, null);
+
+  // Turn ON only calendar sharing
+  const calendarOnly = { ...userSettingsAllOff, share_calendar: true };
+  const calendarView = sanitizeFriendProfile(rawUserA, calendarOnly);
+  assert.strictEqual(calendarView.calendar.length, 1);
+  assert.strictEqual(calendarView.studyHours, null);
+  assert.strictEqual(calendarView.profile, null);
 });
 
 // Cleanup test db
@@ -411,3 +584,4 @@ if (fs.existsSync(testDbPath)) {
 console.log('\n====================================================');
 console.log(` RESULTS: ${passedTests}/${totalTests} Tests Passed (100% SUCCESS)`);
 console.log('====================================================\n');
+

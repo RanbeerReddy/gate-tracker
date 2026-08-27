@@ -1,5 +1,6 @@
 import { ipcMain } from 'electron';
 import { getDatabase } from '../database/connection';
+import { formatLocalDate } from '../utils/dates';
 
 export function registerRevisionHandlers(): void {
   const db = getDatabase();
@@ -32,9 +33,9 @@ export function registerRevisionHandlers(): void {
       VALUES (?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       data.topic_id, data.subtopic_id || null,
-      data.revision_date || new Date().toISOString().slice(0, 10),
+      data.revision_date || formatLocalDate(new Date()),
       data.performance_rating || null, data.confidence || null,
-      data.notes || null, adjustedNextDate.toISOString().slice(0, 10),
+      data.notes || null, formatLocalDate(adjustedNextDate),
       revisionNumber
     );
     
