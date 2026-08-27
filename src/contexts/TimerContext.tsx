@@ -61,12 +61,33 @@ const TimerContext = createContext<TimerContextType>({
 export function TimerProvider({ children }: { children: React.ReactNode }) {
   const [timer, setTimer] = useState<TimerState>(defaultTimer);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const lastTickRef = useRef<number>(Date.now());
 
-  // Update elapsed time every second
+  // Update elapsed time every second with sleep/drift gap protection
   useEffect(() => {
     if (timer.isRunning && !timer.isPaused && timer.startTime) {
+      lastTickRef.current = Date.now();
       intervalRef.current = setInterval(() => {
         const now = Date.now();
+        const delta = now - lastTickRef.current;
+        lastTickRef.current = now;
+
+        // Gap detection: if interval was blocked or OS was in sleep/suspend (> 2500ms between 1s ticks)
+        if (delta > 2500) {
+          const sleepGapSeconds = Math.floor((delta - 1000) / 1000);
+          setTimer(prev => {
+            const updatedPauseTime = prev.totalPauseTime + sleepGapSeconds;
+            const totalElapsed = Math.floor((now - prev.startTime!) / 1000);
+            const activeElapsed = Math.max(0, totalElapsed - updatedPauseTime);
+            return {
+              ...prev,
+              totalPauseTime: updatedPauseTime,
+              elapsed: activeElapsed,
+            };
+          });
+          return;
+        }
+
         const totalElapsed = Math.floor((now - timer.startTime!) / 1000);
         const activeElapsed = totalElapsed - timer.totalPauseTime;
         setTimer(prev => ({ ...prev, elapsed: Math.max(0, activeElapsed) }));
@@ -81,6 +102,39 @@ export function TimerProvider({ children }: { children: React.ReactNode }) {
       if (intervalRef.current) clearInterval(intervalRef.current);
     };
   }, [timer.isRunning, timer.isPaused, timer.startTime, timer.totalPauseTime]);
+
+  // Listen to OS power suspend & resume events
+  useEffect(() => {
+    if (!window.electronAPI?.power) return;
+
+    const cleanupSuspend = window.electronAPI.power.onSuspend(() => {
+      setTimer(prev => {
+        if (!prev.isRunning || prev.isPaused) return prev;
+        return {
+          ...prev,
+          isPaused: true,
+          pauseStart: Date.now(),
+        };
+      });
+    });
+
+    const cleanupResume = window.electronAPI.power.onResume((durationSeconds: number) => {
+      if (durationSeconds > 0) {
+        setTimer(prev => {
+          if (!prev.isRunning) return prev;
+          return {
+            ...prev,
+            totalPauseTime: prev.totalPauseTime + durationSeconds,
+          };
+        });
+      }
+    });
+
+    return () => {
+      cleanupSuspend();
+      cleanupResume();
+    };
+  }, []);
 
   // Save active state periodically for crash recovery
   useEffect(() => {
@@ -101,10 +155,10 @@ export function TimerProvider({ children }: { children: React.ReactNode }) {
       try {
         const activeState = await window.electronAPI.sessions.getActiveState();
         if (activeState?.isActive && activeState.sessionId) {
-          // Restore timer state
+          // Restore timer state in paused mode so user can resume consciously
           setTimer({
             isRunning: true,
-            isPaused: true, // Start paused so user can confirm
+            isPaused: true,
             sessionId: activeState.sessionId,
             subjectId: activeState.subjectId,
             topicId: activeState.topicId,
