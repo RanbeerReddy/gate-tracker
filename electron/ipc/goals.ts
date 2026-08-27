@@ -1,5 +1,6 @@
 import { ipcMain } from 'electron';
 import { getDatabase } from '../database/connection';
+import { formatLocalDate, getStartOfWeek, getStartOfMonth } from '../utils/dates';
 
 export function registerGoalHandlers(): void {
   const db = getDatabase();
@@ -19,39 +20,42 @@ export function registerGoalHandlers(): void {
 
   ipcMain.handle('goals:getActive', () => {
     const goals = db.prepare('SELECT * FROM goals WHERE is_active = 1 ORDER BY type, metric').all() as any[];
+    const today = formatLocalDate(new Date());
+    const weekStart = getStartOfWeek(new Date());
+    const monthStart = getStartOfMonth(new Date());
     
     // Calculate current progress for each goal
     return goals.map(goal => {
       let currentValue = 0;
-      const today = new Date().toISOString().slice(0, 10);
       
       if (goal.type === 'daily') {
         if (goal.metric === 'study_hours') {
           const result = db.prepare(`
             SELECT COALESCE(SUM(duration_seconds), 0) / 3600.0 as hours
-            FROM study_sessions WHERE date(start_time) = date('now') AND is_active = 0
-          `).get() as any;
+            FROM study_sessions WHERE date(start_time) = ? AND is_active = 0
+          `).get(today) as any;
           currentValue = result.hours || 0;
         } else if (goal.metric === 'questions') {
           const result = db.prepare(`
-            SELECT COUNT(*) as count FROM questions WHERE date(created_at) = date('now')
-          `).get() as any;
+            SELECT COUNT(*) as count FROM questions WHERE date(created_at) = ?
+          `).get(today) as any;
           currentValue = result.count || 0;
         }
       } else if (goal.type === 'weekly') {
+        // Standard Monday -> Sunday calendar week
         if (goal.metric === 'study_hours') {
           const result = db.prepare(`
             SELECT COALESCE(SUM(duration_seconds), 0) / 3600.0 as hours
             FROM study_sessions 
-            WHERE start_time >= datetime('now', 'weekday 0', '-7 days')
+            WHERE date(start_time) >= ?
             AND is_active = 0
-          `).get() as any;
+          `).get(weekStart) as any;
           currentValue = result.hours || 0;
         } else if (goal.metric === 'questions') {
           const result = db.prepare(`
             SELECT COUNT(*) as count FROM questions 
-            WHERE created_at >= datetime('now', 'weekday 0', '-7 days')
-          `).get() as any;
+            WHERE date(created_at) >= ?
+          `).get(weekStart) as any;
           currentValue = result.count || 0;
         }
       } else if (goal.type === 'monthly') {
@@ -59,15 +63,15 @@ export function registerGoalHandlers(): void {
           const result = db.prepare(`
             SELECT COALESCE(SUM(duration_seconds), 0) / 3600.0 as hours
             FROM study_sessions 
-            WHERE start_time >= datetime('now', 'start of month')
+            WHERE date(start_time) >= ?
             AND is_active = 0
-          `).get() as any;
+          `).get(monthStart) as any;
           currentValue = result.hours || 0;
         } else if (goal.metric === 'questions') {
           const result = db.prepare(`
             SELECT COUNT(*) as count FROM questions 
-            WHERE created_at >= datetime('now', 'start of month')
-          `).get() as any;
+            WHERE date(created_at) >= ?
+          `).get(monthStart) as any;
           currentValue = result.count || 0;
         }
       }
