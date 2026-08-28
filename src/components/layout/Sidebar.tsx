@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { NavLink } from 'react-router-dom';
 import { useTimer } from '../../contexts/TimerContext';
 import { useAuth } from '../../contexts/AuthContext';
@@ -17,6 +17,13 @@ interface SidebarProps {
 export default function Sidebar({ revisionDueCount = 0 }: SidebarProps) {
   const { timer } = useTimer();
   const { user, profile, mode, isLoading } = useAuth();
+  const [activePaper, setActivePaper] = useState<string>('CS');
+
+  useEffect(() => {
+    window.electronAPI.settings.get('gate_paper').then(p => {
+      if (p) setActivePaper(p);
+    });
+  }, []);
 
   // Build safe display values — never show "undefined"
   const userInitial = profile?.display_name?.[0]?.toUpperCase()
@@ -28,8 +35,8 @@ export default function Sidebar({ revisionDueCount = 0 }: SidebarProps) {
     || user?.email?.split('@')[0]
     || 'Signed In';
   const displaySub = profile?.target_gate_year
-    ? `GATE ${profile.target_gate_year}`
-    : 'Signed In';
+    ? `GATE ${profile.gate_paper || activePaper} ${profile.target_gate_year}`
+    : `GATE ${activePaper}`;
 
   const mainNav: NavItem[] = [
     { path: '/', icon: '📊', label: 'Dashboard' },

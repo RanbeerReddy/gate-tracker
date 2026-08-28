@@ -28,8 +28,11 @@ export default function People() {
   const [inspectingUser, setInspectingUser] = useState<UserProfile | null>(null);
 
   useEffect(() => {
-    if (user && isOnline) {
-      loadFriendsData();
+    if (isOnline) {
+      if (user) {
+        loadFriendsData();
+      }
+      handleSearch('');
     }
   }, [user, isOnline]);
 
@@ -46,13 +49,9 @@ export default function People() {
 
   const handleSearch = async (query: string) => {
     setSearchQuery(query);
-    if (!query.trim()) {
-      setSearchResults([]);
-      return;
-    }
     setLoading(true);
     const results = await searchUsers(query);
-    setSearchResults(results.filter(u => u.id !== user?.id));
+    setSearchResults(results);
     setLoading(false);
   };
 
@@ -219,7 +218,11 @@ export default function People() {
                           </button>
                         )}
 
-                        {isFriend ? (
+                        {userItem.id === user?.id ? (
+                          <span className="tag" style={{ background: 'var(--accent-subtle)', color: 'var(--accent)', fontWeight: 600 }}>
+                            You (Your Profile)
+                          </span>
+                        ) : isFriend ? (
                           <span className="tag" style={{ background: 'var(--success-subtle)', color: 'var(--success)' }}>
                             ✓ Friends
                           </span>

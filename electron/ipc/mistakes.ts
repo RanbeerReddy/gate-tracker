@@ -1,5 +1,6 @@
 import { ipcMain } from 'electron';
 import { getDatabase } from '../database/connection';
+import { getActiveGatePaper } from './subjects';
 
 export function registerMistakeHandlers(): void {
   const db = getDatabase();
@@ -17,9 +18,15 @@ export function registerMistakeHandlers(): void {
   });
 
   ipcMain.handle('mistakes:getAll', (_e, filters: any = {}) => {
+    const activePaper = getActiveGatePaper(db, filters.gate_paper || filters.paper);
     let where = 'WHERE 1=1';
     const params: any[] = [];
     
+    if (filters.paper !== 'ALL' && filters.gate_paper !== 'ALL') {
+      where += ` AND (s.id IS NULL OR s.gate_paper = ? OR s.gate_paper = 'SHARED' OR s.gate_paper = 'ALL')`;
+      params.push(activePaper);
+    }
+
     if (filters.subject_id) { where += ' AND m.subject_id = ?'; params.push(filters.subject_id); }
     if (filters.topic_id) { where += ' AND m.topic_id = ?'; params.push(filters.topic_id); }
     if (filters.category) { where += ' AND m.category = ?'; params.push(filters.category); }

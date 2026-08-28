@@ -89,18 +89,20 @@ export function registerEventHandlers(): void {
     return { success: true };
   });
 
-  ipcMain.handle('events:getExamInfo', () => {
+  ipcMain.handle('events:getExamInfo', (_e, paper?: string) => {
     const examEvent = db.prepare(`
       SELECT * FROM calendar_events 
       WHERE is_exam = 1 AND is_active = 1 
       ORDER BY event_date ASC LIMIT 1
     `).get() as any;
 
+    const activePaper = paper || (db.prepare("SELECT value FROM settings WHERE key = 'gate_paper'").get() as any)?.value || 'CS';
     const dateSetting = db.prepare("SELECT value FROM settings WHERE key = 'gate_exam_date'").get() as any;
     const nameSetting = db.prepare("SELECT value FROM settings WHERE key = 'gate_exam_name'").get() as any;
 
+    const defaultExamName = activePaper === 'EC' ? 'GATE EC 2027' : 'GATE CS 2027';
     const examDate = examEvent?.event_date || dateSetting?.value || '2027-02-07';
-    const examName = examEvent?.name || nameSetting?.value || 'GATE CSE 2027';
+    let examName = examEvent?.name || nameSetting?.value || defaultExamName;
 
     // Calculate days remaining without UTC drift
     const { daysRemaining, isPast } = calculateDaysRemaining(examDate);

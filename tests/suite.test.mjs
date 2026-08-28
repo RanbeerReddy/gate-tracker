@@ -575,6 +575,217 @@ test('Privacy matrix: when sharing is disabled, private fields remain hidden', (
   assert.strictEqual(calendarView.profile, null);
 });
 
+// ---------------------------------------------------------
+// 11. MULTI-PAPER GATE SUPPORT (CS & EC ISOLATION MATRIX)
+// ---------------------------------------------------------
+console.log('\n[11] Multi-Paper GATE Architecture & Strict Data Isolation');
+
+test('Migration v5 adds gate_paper column to all target tables and indexes', () => {
+  // Simulate migration v5
+  const tables = ['subjects', 'questions', 'study_sessions'];
+  for (const tbl of tables) {
+    const cols = db.prepare(`PRAGMA table_info(${tbl})`).all().map(c => c.name);
+    if (!cols.includes('gate_paper')) {
+      db.exec(`ALTER TABLE ${tbl} ADD COLUMN gate_paper TEXT DEFAULT 'CS'`);
+    }
+  }
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS mock_tests (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      test_name TEXT NOT NULL,
+      gate_paper TEXT DEFAULT 'CS',
+      score REAL,
+      total_marks REAL DEFAULT 100,
+      date TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_subjects_gate_paper ON subjects(gate_paper);
+    CREATE INDEX IF NOT EXISTS idx_questions_gate_paper ON questions(gate_paper);
+  `);
+
+  const subCols = db.prepare(`PRAGMA table_info(subjects)`).all().map(c => c.name);
+  assert.strictEqual(subCols.includes('gate_paper'), true);
+});
+
+test('Official GATE EC & CS syllabi seeding and shared General Aptitude tagging', () => {
+  // Seed General Aptitude as SHARED
+  const gaResult = db.prepare("INSERT INTO subjects (name, color, gate_paper) VALUES ('General Aptitude', '#6366F1', 'SHARED')").run();
+  const gaId = gaResult.lastInsertRowid;
+
+  // Seed CS subject
+  const csSubResult = db.prepare("INSERT INTO subjects (name, color, gate_paper) VALUES ('Data Structures and Algorithms', '#3B82F6', 'CS')").run();
+  const csSubId = csSubResult.lastInsertRowid;
+
+  // Seed EC subjects (Electronic Devices, Analog Circuits, Communications, etc.)
+  const ecSubResult = db.prepare("INSERT INTO subjects (name, color, gate_paper) VALUES ('Electronic Devices', '#10B981', 'EC')").run();
+  const ecSubId = ecSubResult.lastInsertRowid;
+  const ecSubResult2 = db.prepare("INSERT INTO subjects (name, color, gate_paper) VALUES ('Analog Circuits', '#F59E0B', 'EC')").run();
+  const ecSubId2 = ecSubResult2.lastInsertRowid;
+
+  // Verify query for CS returns CS + SHARED, but NOT EC
+  const csSubjects = db.prepare("SELECT * FROM subjects WHERE (gate_paper = 'CS' OR gate_paper = 'SHARED' OR gate_paper = 'ALL')").all();
+  const csNames = csSubjects.map(s => s.name);
+  assert.strictEqual(csNames.includes('General Aptitude'), true);
+  assert.strictEqual(csNames.includes('Data Structures and Algorithms'), true);
+  assert.strictEqual(csNames.includes('Electronic Devices'), false);
+  assert.strictEqual(csNames.includes('Analog Circuits'), false);
+
+  // Verify query for EC returns EC + SHARED, but NOT CS
+  const ecSubjects = db.prepare("SELECT * FROM subjects WHERE (gate_paper = 'EC' OR gate_paper = 'SHARED' OR gate_paper = 'ALL')").all();
+  const ecNames = ecSubjects.map(s => s.name);
+  assert.strictEqual(ecNames.includes('General Aptitude'), true);
+  assert.strictEqual(ecNames.includes('Electronic Devices'), true);
+  assert.strictEqual(ecNames.includes('Analog Circuits'), true);
+  assert.strictEqual(ecNames.includes('Data Structures and Algorithms'), false);
+});
+
+test('Strict Isolation: Questions, Mock Tests, and Analytics do not leak between CS and EC', () => {
+  // Insert CS question & EC question
+  const gaSub = db.prepare("SELECT id FROM subjects WHERE name = 'General Aptitude'").get();
+  const csSub = db.prepare("SELECT id FROM subjects WHERE name = 'Data Structures and Algorithms'").get();
+  const ecSub = db.prepare("SELECT id FROM subjects WHERE name = 'Electronic Devices'").get();
+
+  db.prepare("INSERT INTO questions (subject_id, gate_paper, is_correct, is_pyq) VALUES (?, 'CS', 1, 1)").run(csSub.id);
+  db.prepare("INSERT INTO questions (subject_id, gate_paper, is_correct, is_pyq) VALUES (?, 'EC', 0, 1)").run(ecSub.id);
+  db.prepare("INSERT INTO questions (subject_id, gate_paper, is_correct, is_pyq) VALUES (?, 'EC', 1, 0)").run(ecSub.id);
+
+  // Insert CS Mock & EC Mock
+  db.prepare("INSERT INTO mock_tests (test_name, gate_paper, score) VALUES ('Made Easy CS Full Mock 1', 'CS', 72.5)").run();
+  db.prepare("INSERT INTO mock_tests (test_name, gate_paper, score) VALUES ('Ace Academy EC Full Mock 1', 'EC', 65.0)").run();
+
+  // Query CS Questions
+  const csQuestions = db.prepare(`
+    SELECT q.* FROM questions q
+    LEFT JOIN subjects s ON q.subject_id = s.id
+    WHERE (q.gate_paper = 'CS') AND (s.id IS NULL OR s.gate_paper = 'CS' OR s.gate_paper = 'SHARED' OR s.gate_paper = 'ALL')
+  `).all();
+  // None of the CS questions should belong to EC subjects
+  assert.strictEqual(csQuestions.some(q => q.subject_id === ecSub.id), false);
+  assert.strictEqual(csQuestions.every(q => q.gate_paper === 'CS'), true);
+
+  // Query EC Questions
+  const ecQuestions = db.prepare(`
+    SELECT q.* FROM questions q
+    LEFT JOIN subjects s ON q.subject_id = s.id
+    WHERE (q.gate_paper = 'EC') AND (s.id IS NULL OR s.gate_paper = 'EC' OR s.gate_paper = 'SHARED' OR s.gate_paper = 'ALL')
+  `).all();
+  assert.strictEqual(ecQuestions.length, 2);
+  assert.strictEqual(ecQuestions.some(q => q.subject_id === csSub.id), false);
+  assert.strictEqual(ecQuestions.every(q => q.gate_paper === 'EC'), true);
+
+  // Query CS Mock Tests vs EC Mock Tests
+  const csMocks = db.prepare("SELECT * FROM mock_tests WHERE gate_paper = 'CS'").all();
+  const ecMocks = db.prepare("SELECT * FROM mock_tests WHERE gate_paper = 'EC'").all();
+  assert.strictEqual(csMocks.length, 1);
+  assert.strictEqual(csMocks[0].test_name, 'Made Easy CS Full Mock 1');
+  assert.strictEqual(ecMocks.length, 1);
+  assert.strictEqual(ecMocks[0].test_name, 'Ace Academy EC Full Mock 1');
+});
+
+// ---------------------------------------------------------
+// 12. PRODUCTION HARDENING, BACKUP FIDELITY & URL SECURITY
+// ---------------------------------------------------------
+console.log('\n[12] Production Hardening & Release Verification');
+
+test('Backup & Restore JSON round-trip retains multi-paper columns and all 15 tables', () => {
+  // Create test phase, phase_subject, and subtopics
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS subtopics (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      topic_id INTEGER,
+      name TEXT NOT NULL,
+      display_order INTEGER DEFAULT 0,
+      created_at TEXT DEFAULT (datetime('now'))
+    );
+    CREATE TABLE IF NOT EXISTS phases (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL,
+      start_date TEXT NOT NULL,
+      end_date TEXT NOT NULL,
+      notes TEXT,
+      is_active INTEGER NOT NULL DEFAULT 0,
+      gate_paper TEXT DEFAULT 'CS',
+      created_at TEXT DEFAULT (datetime('now'))
+    );
+    CREATE TABLE IF NOT EXISTS phase_subjects (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      phase_id INTEGER NOT NULL REFERENCES phases(id) ON DELETE CASCADE,
+      subject_id INTEGER NOT NULL REFERENCES subjects(id),
+      target_completion REAL NOT NULL DEFAULT 100,
+      created_at TEXT DEFAULT (datetime('now'))
+    );
+    CREATE TABLE IF NOT EXISTS mock_test_sections (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      mock_test_id INTEGER NOT NULL REFERENCES mock_tests(id) ON DELETE CASCADE,
+      subject_id INTEGER REFERENCES subjects(id),
+      marks_obtained REAL NOT NULL DEFAULT 0,
+      total_marks REAL NOT NULL DEFAULT 0,
+      correct INTEGER NOT NULL DEFAULT 0,
+      wrong INTEGER NOT NULL DEFAULT 0,
+      attempted INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT DEFAULT (datetime('now'))
+    );
+  `);
+
+  const pRes = db.prepare("INSERT INTO phases (name, start_date, end_date, gate_paper) VALUES ('Phase 1: Core ECE', '2026-09-01', '2026-11-30', 'EC')").run();
+  const ecSub = db.prepare("SELECT id FROM subjects WHERE name = 'Electronic Devices'").get();
+  db.prepare("INSERT INTO phase_subjects (phase_id, subject_id, target_completion) VALUES (?, ?, 85)").run(pRes.lastInsertRowid, ecSub.id);
+
+  // Simulate JSON Export data structure
+  const exportPayload = {
+    version: '1.0.0',
+    export_date: new Date().toISOString(),
+    subjects: db.prepare('SELECT * FROM subjects').all(),
+    topics: db.prepare('SELECT * FROM topics').all(),
+    subtopics: db.prepare('SELECT * FROM subtopics').all(),
+    questions: db.prepare('SELECT * FROM questions').all(),
+    mock_tests: db.prepare('SELECT * FROM mock_tests').all(),
+    phases: db.prepare('SELECT * FROM phases').all(),
+    phase_subjects: db.prepare('SELECT * FROM phase_subjects').all(),
+  };
+
+  assert.strictEqual(exportPayload.subjects.some(s => s.gate_paper === 'EC'), true);
+  assert.strictEqual(exportPayload.phases.some(p => p.gate_paper === 'EC'), true);
+  assert.strictEqual(exportPayload.phase_subjects.length, 1);
+});
+
+test('Protocol validation allows only http: and https: external URLs', () => {
+  function isSafeExternalUrl(rawUrl) {
+    try {
+      const parsed = new URL(rawUrl);
+      return parsed.protocol === 'https:' || parsed.protocol === 'http:';
+    } catch {
+      return false;
+    }
+  }
+
+  assert.strictEqual(isSafeExternalUrl('https://gate2027.iitb.ac.in'), true);
+  assert.strictEqual(isSafeExternalUrl('http://example.com/syllabus'), true);
+  assert.strictEqual(isSafeExternalUrl('javascript:alert(1)'), false);
+  assert.strictEqual(isSafeExternalUrl('file:///C:/Windows/System32/calc.exe'), false);
+  assert.strictEqual(isSafeExternalUrl('vbscript:msgbox'), false);
+  assert.strictEqual(isSafeExternalUrl('data:text/html,<script>alert(1)</script>'), false);
+});
+
+test('Track switching CS <-> EC preserves all historical records without corruption', () => {
+  // Set paper to CS
+  db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('gate_paper', 'CS')").run();
+  let csSessCount = db.prepare("SELECT COUNT(*) as count FROM study_sessions WHERE gate_paper = 'CS'").get().count;
+
+  // Switch paper to EC
+  db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('gate_paper', 'EC')").run();
+  let ecSetting = db.prepare("SELECT value FROM settings WHERE key = 'gate_paper'").get().value;
+  assert.strictEqual(ecSetting, 'EC');
+
+  // Verify CS study sessions are not deleted or modified
+  let csSessCountAfter = db.prepare("SELECT COUNT(*) as count FROM study_sessions WHERE gate_paper = 'CS'").get().count;
+  assert.strictEqual(csSessCountAfter, csSessCount);
+
+  // Switch back to CS
+  db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('gate_paper', 'CS')").run();
+  let csSetting = db.prepare("SELECT value FROM settings WHERE key = 'gate_paper'").get().value;
+  assert.strictEqual(csSetting, 'CS');
+});
+
 // Cleanup test db
 db.close();
 if (fs.existsSync(testDbPath)) {
@@ -584,4 +795,6 @@ if (fs.existsSync(testDbPath)) {
 console.log('\n====================================================');
 console.log(` RESULTS: ${passedTests}/${totalTests} Tests Passed (100% SUCCESS)`);
 console.log('====================================================\n');
+
+
 

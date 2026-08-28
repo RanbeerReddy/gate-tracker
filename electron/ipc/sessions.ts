@@ -1,25 +1,35 @@
 import { ipcMain } from 'electron';
 import { getDatabase } from '../database/connection';
 import { log } from '../utils/logger';
+import { getActiveGatePaper } from './subjects';
 
 export function registerSessionHandlers(): void {
   const db = getDatabase();
 
   ipcMain.handle('sessions:start', (_e, data: any) => {
+    let paper = data.gate_paper;
+    if (!paper && data.subject_id) {
+      const subj = db.prepare('SELECT gate_paper FROM subjects WHERE id = ?').get(data.subject_id) as any;
+      if (subj?.gate_paper && subj.gate_paper !== 'SHARED' && subj.gate_paper !== 'ALL') {
+        paper = subj.gate_paper;
+      }
+    }
+    if (!paper) paper = getActiveGatePaper(db);
+
     const now = new Date().toISOString();
     const result = db.prepare(`
-      INSERT INTO study_sessions (subject_id, topic_id, subtopic_id, activity_type, start_time, is_active)
-      VALUES (?, ?, ?, ?, ?, 1)
-    `).run(data.subject_id, data.topic_id || null, data.subtopic_id || null, data.activity_type || 'learning', now);
+      INSERT INTO study_sessions (subject_id, topic_id, subtopic_id, activity_type, start_time, is_active, gate_paper)
+      VALUES (?, ?, ?, ?, ?, 1, ?)
+    `).run(data.subject_id, data.topic_id || null, data.subtopic_id || null, data.activity_type || 'learning', now, paper);
     
     const session = db.prepare('SELECT * FROM study_sessions WHERE id = ?').get(result.lastInsertRowid);
     
     // Save active state for crash recovery
     db.prepare("UPDATE active_session SET session_data = ?, updated_at = datetime('now') WHERE id = 1").run(
-      JSON.stringify({ sessionId: result.lastInsertRowid, isActive: true, startTime: now })
+      JSON.stringify({ sessionId: result.lastInsertRowid, isActive: true, startTime: now, gatePaper: paper })
     );
     
-    log(`Study session started: ${result.lastInsertRowid}`);
+    log(`Study session started: ${result.lastInsertRowid} (paper: ${paper})`);
     return session;
   });
 
@@ -63,8 +73,14 @@ export function registerSessionHandlers(): void {
   });
 
   ipcMain.handle('sessions:getAll', (_e, filters: any = {}) => {
+    const activePaper = getActiveGatePaper(db, filters.gate_paper || filters.paper);
     let where = 'WHERE ss.is_active = 0';
     const params: any[] = [];
+
+    if (filters.paper !== 'ALL' && filters.gate_paper !== 'ALL') {
+      where += ` AND (ss.gate_paper = ? OR s.gate_paper = ? OR s.gate_paper = 'SHARED' OR s.gate_paper = 'ALL')`;
+      params.push(activePaper, activePaper);
+    }
     
     if (filters.subject_id) {
       where += ' AND ss.subject_id = ?';

@@ -99,7 +99,7 @@ export default function PYQs() {
         </div>
       )}
 
-      {questions.length > 0 && (
+      {questions.length > 0 ? (
         <div className="card" style={{ padding: 0 }}>
           <table className="data-table">
             <thead>
@@ -118,6 +118,14 @@ export default function PYQs() {
               ))}
             </tbody>
           </table>
+        </div>
+      ) : (
+        <div className="empty-state" style={{ padding: 'var(--space-12) var(--space-4)', textAlign: 'center' }}>
+          <div style={{ fontSize: '36px', marginBottom: 'var(--space-2)' }}>📝</div>
+          <h3 className="text-base font-semibold mb-1">No PYQs Logged Yet</h3>
+          <p className="text-secondary text-xs" style={{ maxWidth: '400px', margin: '0 auto var(--space-4)' }}>
+            Log Previous Year Questions from the Questions tab or during your study sessions to track your PYQ accuracy and topic coverage.
+          </p>
         </div>
       )}
     </div>

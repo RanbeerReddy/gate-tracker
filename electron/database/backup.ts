@@ -197,12 +197,12 @@ export function importData(filepath: string): { importedCounts: Record<string, n
       // 2. Import Subjects
       if (Array.isArray(data.subjects) && data.subjects.length > 0) {
         const stmt = db.prepare(`
-          INSERT OR REPLACE INTO subjects (id, name, color, display_order, is_archived, created_at, updated_at)
-          VALUES (?, ?, ?, ?, ?, COALESCE(?, datetime('now')), COALESCE(?, datetime('now')))
+          INSERT OR REPLACE INTO subjects (id, name, color, display_order, is_archived, gate_paper, created_at, updated_at)
+          VALUES (?, ?, ?, ?, ?, ?, COALESCE(?, datetime('now')), COALESCE(?, datetime('now')))
         `);
         let c = 0;
         for (const s of data.subjects) {
-          stmt.run(s.id, s.name, s.color || '#3B82F6', s.display_order || 0, s.is_archived || 0, s.created_at, s.updated_at);
+          stmt.run(s.id, s.name, s.color || '#3B82F6', s.display_order || 0, s.is_archived || 0, s.gate_paper || 'CS', s.created_at, s.updated_at);
           c++;
         }
         counts.subjects = c;
@@ -239,8 +239,8 @@ export function importData(filepath: string): { importedCounts: Record<string, n
       // 5. Import Study Sessions
       if (Array.isArray(data.study_sessions) && data.study_sessions.length > 0) {
         const stmt = db.prepare(`
-          INSERT OR REPLACE INTO study_sessions (id, subject_id, topic_id, subtopic_id, activity_type, start_time, end_time, duration_seconds, pause_duration_seconds, notes, questions_solved, focus_rating, is_active, created_at)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE(?, datetime('now')))
+          INSERT OR REPLACE INTO study_sessions (id, subject_id, topic_id, subtopic_id, activity_type, start_time, end_time, duration_seconds, pause_duration_seconds, notes, questions_solved, focus_rating, is_active, gate_paper, created_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE(?, datetime('now')))
         `);
         let c = 0;
         for (const ss of data.study_sessions) {
@@ -249,7 +249,7 @@ export function importData(filepath: string): { importedCounts: Record<string, n
             ss.activity_type || 'learning', ss.start_time, ss.end_time,
             ss.duration_seconds || 0, ss.pause_duration_seconds || 0,
             ss.notes || null, ss.questions_solved || 0, ss.focus_rating || null,
-            ss.is_active || 0, ss.created_at
+            ss.is_active || 0, ss.gate_paper || 'CS', ss.created_at
           );
           c++;
         }
@@ -259,8 +259,8 @@ export function importData(filepath: string): { importedCounts: Record<string, n
       // 6. Import Questions
       if (Array.isArray(data.questions) && data.questions.length > 0) {
         const stmt = db.prepare(`
-          INSERT OR REPLACE INTO questions (id, source, year, subject_id, topic_id, subtopic_id, difficulty, question_type, is_correct, time_seconds, confidence, is_pyq, notes, created_at)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE(?, datetime('now')))
+          INSERT OR REPLACE INTO questions (id, source, year, subject_id, topic_id, subtopic_id, difficulty, question_type, is_correct, time_seconds, confidence, is_pyq, gate_paper, notes, created_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE(?, datetime('now')))
         `);
         let c = 0;
         for (const q of data.questions) {
@@ -269,7 +269,7 @@ export function importData(filepath: string): { importedCounts: Record<string, n
             q.topic_id || null, q.subtopic_id || null, q.difficulty || 'medium',
             q.question_type || 'mcq', q.is_correct !== undefined ? q.is_correct : null,
             q.time_seconds || null, q.confidence || 'medium', q.is_pyq || 0,
-            q.notes || null, q.created_at
+            q.gate_paper || 'CS', q.notes || null, q.created_at
           );
           c++;
         }
@@ -316,60 +316,109 @@ export function importData(filepath: string): { importedCounts: Record<string, n
       // 9. Import Mock Tests
       if (Array.isArray(data.mock_tests) && data.mock_tests.length > 0) {
         const stmt = db.prepare(`
-          INSERT OR REPLACE INTO mock_tests (id, date, test_name, total_marks, score, attempted, correct, wrong, unattempted, negative_marks, time_minutes, notes, created_at)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE(?, datetime('now')))
+          INSERT OR REPLACE INTO mock_tests (id, date, test_name, total_marks, score, attempted, correct, wrong, unattempted, negative_marks, time_minutes, gate_paper, notes, created_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE(?, datetime('now')))
         `);
         let c = 0;
         for (const mt of data.mock_tests) {
           stmt.run(
             mt.id, mt.date, mt.test_name, mt.total_marks || 100, mt.score || 0,
             mt.attempted || 0, mt.correct || 0, mt.wrong || 0, mt.unattempted || 0,
-            mt.negative_marks || 0, mt.time_minutes || null, mt.notes || null,
-            mt.created_at
+            mt.negative_marks || 0, mt.time_minutes || null, mt.gate_paper || 'CS',
+            mt.notes || null, mt.created_at
           );
           c++;
         }
         counts.mock_tests = c;
       }
 
-      // 10. Import Goals
+      // 10. Import Mock Test Sections
+      if (Array.isArray(data.mock_test_sections) && data.mock_test_sections.length > 0) {
+        const stmt = db.prepare(`
+          INSERT OR REPLACE INTO mock_test_sections (id, mock_test_id, subject_id, marks_obtained, total_marks, correct, wrong, attempted, created_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, COALESCE(?, datetime('now')))
+        `);
+        let c = 0;
+        for (const mts of data.mock_test_sections) {
+          stmt.run(
+            mts.id, mts.mock_test_id, mts.subject_id || null, mts.marks_obtained || 0,
+            mts.total_marks || 0, mts.correct || 0, mts.wrong || 0, mts.attempted || 0,
+            mts.created_at
+          );
+          c++;
+        }
+        counts.mock_test_sections = c;
+      }
+
+      // 11. Import Goals
       if (Array.isArray(data.goals) && data.goals.length > 0) {
         const stmt = db.prepare(`
-          INSERT OR REPLACE INTO goals (id, type, metric, target_value, current_value, start_date, end_date, is_active, notes, created_at)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE(?, datetime('now')))
+          INSERT OR REPLACE INTO goals (id, type, metric, target_value, current_value, start_date, end_date, is_active, gate_paper, notes, created_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE(?, datetime('now')))
         `);
         let c = 0;
         for (const g of data.goals) {
           stmt.run(
             g.id, g.type, g.metric, g.target_value, g.current_value || 0,
             g.start_date || null, g.end_date || null, g.is_active || 1,
-            g.notes || null, g.created_at
+            g.gate_paper || 'CS', g.notes || null, g.created_at
           );
           c++;
         }
         counts.goals = c;
       }
 
-      // 11. Import Planned Sessions
+      // 12. Import Phases
+      if (Array.isArray(data.phases) && data.phases.length > 0) {
+        const stmt = db.prepare(`
+          INSERT OR REPLACE INTO phases (id, name, start_date, end_date, notes, is_active, gate_paper, created_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?, COALESCE(?, datetime('now')))
+        `);
+        let c = 0;
+        for (const p of data.phases) {
+          stmt.run(
+            p.id, p.name, p.start_date, p.end_date, p.notes || null,
+            p.is_active || 0, p.gate_paper || 'CS', p.created_at
+          );
+          c++;
+        }
+        counts.phases = c;
+      }
+
+      // 13. Import Phase Subjects
+      if (Array.isArray(data.phase_subjects) && data.phase_subjects.length > 0) {
+        const stmt = db.prepare(`
+          INSERT OR REPLACE INTO phase_subjects (id, phase_id, subject_id, target_completion, created_at)
+          VALUES (?, ?, ?, ?, COALESCE(?, datetime('now')))
+        `);
+        let c = 0;
+        for (const ps of data.phase_subjects) {
+          stmt.run(ps.id, ps.phase_id, ps.subject_id, ps.target_completion || 100, ps.created_at);
+          c++;
+        }
+        counts.phase_subjects = c;
+      }
+
+      // 14. Import Planned Sessions
       if (Array.isArray(data.planned_sessions) && data.planned_sessions.length > 0) {
         const stmt = db.prepare(`
-          INSERT OR REPLACE INTO planned_sessions (id, date, subject_id, topic_id, subtopic_id, activity_type, start_time, end_time, notes, is_completed, linked_session_id, created_at)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE(?, datetime('now')))
+          INSERT OR REPLACE INTO planned_sessions (id, date, subject_id, topic_id, subtopic_id, activity_type, start_time, end_time, gate_paper, notes, is_completed, linked_session_id, created_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE(?, datetime('now')))
         `);
         let c = 0;
         for (const ps of data.planned_sessions) {
           stmt.run(
             ps.id, ps.date, ps.subject_id, ps.topic_id || null, ps.subtopic_id || null,
             ps.activity_type || 'learning', ps.start_time, ps.end_time,
-            ps.notes || null, ps.is_completed || 0, ps.linked_session_id || null,
-            ps.created_at
+            ps.gate_paper || 'CS', ps.notes || null, ps.is_completed || 0,
+            ps.linked_session_id || null, ps.created_at
           );
           c++;
         }
         counts.planned_sessions = c;
       }
 
-      // 12. Import Calendar Events
+      // 15. Import Calendar Events
       if (Array.isArray(data.calendar_events) && data.calendar_events.length > 0) {
         const stmt = db.prepare(`
           INSERT OR REPLACE INTO calendar_events (id, name, event_date, end_date, color, event_type, description, is_exam, is_active, created_at)

@@ -4,7 +4,7 @@ import { contextBridge, ipcRenderer } from 'electron';
 contextBridge.exposeInMainWorld('electronAPI', {
   // Subjects
   subjects: {
-    getAll: () => ipcRenderer.invoke('subjects:getAll'),
+    getAll: (paper?: string) => ipcRenderer.invoke('subjects:getAll', paper),
     getById: (id: number) => ipcRenderer.invoke('subjects:getById', id),
     create: (data: any) => ipcRenderer.invoke('subjects:create', data),
     update: (id: number, data: any) => ipcRenderer.invoke('subjects:update', id, data),
@@ -48,7 +48,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   // Planned Sessions
   planner: {
-    getByDate: (date: string) => ipcRenderer.invoke('planner:getByDate', date),
+    getByDate: (date: string, paper?: string) => ipcRenderer.invoke('planner:getByDate', date, paper),
     create: (data: any) => ipcRenderer.invoke('planner:create', data),
     update: (id: number, data: any) => ipcRenderer.invoke('planner:update', id, data),
     delete: (id: number) => ipcRenderer.invoke('planner:delete', id),
@@ -78,18 +78,18 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // Revisions
   revisions: {
     create: (data: any) => ipcRenderer.invoke('revisions:create', data),
-    getDue: () => ipcRenderer.invoke('revisions:getDue'),
+    getDue: (paper?: string) => ipcRenderer.invoke('revisions:getDue', paper),
     getByTopic: (topicId: number) => ipcRenderer.invoke('revisions:getByTopic', topicId),
     getAll: (filters: any) => ipcRenderer.invoke('revisions:getAll', filters),
     update: (id: number, data: any) => ipcRenderer.invoke('revisions:update', id, data),
     delete: (id: number) => ipcRenderer.invoke('revisions:delete', id),
-    getSchedule: () => ipcRenderer.invoke('revisions:getSchedule'),
+    getSchedule: (paper?: string) => ipcRenderer.invoke('revisions:getSchedule', paper),
   },
 
   // Mock Tests
   mocks: {
     create: (data: any) => ipcRenderer.invoke('mocks:create', data),
-    getAll: () => ipcRenderer.invoke('mocks:getAll'),
+    getAll: (paper?: string) => ipcRenderer.invoke('mocks:getAll', paper),
     getById: (id: number) => ipcRenderer.invoke('mocks:getById', id),
     update: (id: number, data: any) => ipcRenderer.invoke('mocks:update', id, data),
     delete: (id: number) => ipcRenderer.invoke('mocks:delete', id),
@@ -98,8 +98,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // Goals
   goals: {
     create: (data: any) => ipcRenderer.invoke('goals:create', data),
-    getAll: () => ipcRenderer.invoke('goals:getAll'),
-    getActive: () => ipcRenderer.invoke('goals:getActive'),
+    getAll: (paper?: string) => ipcRenderer.invoke('goals:getAll', paper),
+    getActive: (paper?: string) => ipcRenderer.invoke('goals:getActive', paper),
     update: (id: number, data: any) => ipcRenderer.invoke('goals:update', id, data),
     delete: (id: number) => ipcRenderer.invoke('goals:delete', id),
   },
@@ -107,7 +107,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // Phases
   phases: {
     create: (data: any) => ipcRenderer.invoke('phases:create', data),
-    getAll: () => ipcRenderer.invoke('phases:getAll'),
+    getAll: (paper?: string) => ipcRenderer.invoke('phases:getAll', paper),
     getById: (id: number) => ipcRenderer.invoke('phases:getById', id),
     update: (id: number, data: any) => ipcRenderer.invoke('phases:update', id, data),
     delete: (id: number) => ipcRenderer.invoke('phases:delete', id),
@@ -115,12 +115,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   // Analytics
   analytics: {
-    getDashboard: () => ipcRenderer.invoke('analytics:getDashboard'),
-    getStudyAnalytics: (range: any) => ipcRenderer.invoke('analytics:getStudyAnalytics', range),
-    getQuestionAnalytics: (range: any) => ipcRenderer.invoke('analytics:getQuestionAnalytics', range),
-    getWeakAreas: () => ipcRenderer.invoke('analytics:getWeakAreas'),
-    getRecommendations: () => ipcRenderer.invoke('analytics:getRecommendations'),
-    getHeatmap: (year: number) => ipcRenderer.invoke('analytics:getHeatmap', year),
+    getDashboard: (paper?: string) => ipcRenderer.invoke('analytics:getDashboard', paper),
+    getStudyAnalytics: (range: any, paper?: string) => ipcRenderer.invoke('analytics:getStudyAnalytics', range, paper),
+    getQuestionAnalytics: (range: any, paper?: string) => ipcRenderer.invoke('analytics:getQuestionAnalytics', range, paper),
+    getWeakAreas: (paper?: string) => ipcRenderer.invoke('analytics:getWeakAreas', paper),
+    getRecommendations: (paper?: string) => ipcRenderer.invoke('analytics:getRecommendations', paper),
+    getHeatmap: (year: number, paper?: string) => ipcRenderer.invoke('analytics:getHeatmap', year, paper),
     getSubjectStats: (subjectId: number) => ipcRenderer.invoke('analytics:getSubjectStats', subjectId),
     getTopicStats: (topicId: number) => ipcRenderer.invoke('analytics:getTopicStats', topicId),
   },
@@ -144,7 +144,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   // Search
   search: {
-    global: (query: string) => ipcRenderer.invoke('search:global', query),
+    global: (query: string, paper?: string) => ipcRenderer.invoke('search:global', query, paper),
   },
 
   // Setup
@@ -166,7 +166,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     create: (data: any) => ipcRenderer.invoke('events:create', data),
     update: (id: number, data: any) => ipcRenderer.invoke('events:update', id, data),
     delete: (id: number) => ipcRenderer.invoke('events:delete', id),
-    getExamInfo: () => ipcRenderer.invoke('events:getExamInfo'),
+    getExamInfo: (paper?: string) => ipcRenderer.invoke('events:getExamInfo', paper),
   },
 
   // Power / Sleep monitor
@@ -189,3 +189,4 @@ contextBridge.exposeInMainWorld('electronAPI', {
     return () => ipcRenderer.removeListener('force-save-session', callback);
   },
 });
+

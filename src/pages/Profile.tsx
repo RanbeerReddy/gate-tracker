@@ -23,6 +23,7 @@ export default function Profile() {
     display_name: profile?.display_name || '',
     bio: profile?.bio || '',
     target_gate_year: profile?.target_gate_year || new Date().getFullYear() + 1,
+    gate_paper: profile?.gate_paper || 'CS',
   });
 
   // Preview Shared Calendar state
@@ -256,11 +257,23 @@ export default function Profile() {
               </div>
               <div className="text-sm text-secondary mb-2">@{safeUsername}</div>
 
-              {profile?.target_gate_year && (
-                <span className="tag mb-3" style={{ background: 'var(--bg-tertiary)' }}>
-                  🎯 Target: GATE {profile.target_gate_year}
+              <div className="flex items-center justify-center gap-2 mb-3">
+                <span
+                  className="tag"
+                  style={{
+                    background: (profile?.gate_paper === 'EC') ? 'rgba(16, 185, 129, 0.15)' : 'rgba(59, 130, 246, 0.15)',
+                    color: (profile?.gate_paper === 'EC') ? '#10B981' : '#3B82F6',
+                    fontWeight: 600,
+                  }}
+                >
+                  {profile?.gate_paper === 'EC' ? 'GATE EC (ENTC/ECE)' : 'GATE CS (CSE/IT)'}
                 </span>
-              )}
+                {profile?.target_gate_year && (
+                  <span className="tag" style={{ background: 'var(--bg-tertiary)' }}>
+                    🎯 GATE {profile.target_gate_year}
+                  </span>
+                )}
+              </div>
 
               {profile?.bio && (
                 <div className="text-sm text-secondary my-3" style={{ fontStyle: 'italic' }}>
@@ -276,6 +289,7 @@ export default function Profile() {
                       display_name: profile?.display_name || '',
                       bio: profile?.bio || '',
                       target_gate_year: profile?.target_gate_year || new Date().getFullYear() + 1,
+                      gate_paper: profile?.gate_paper || 'CS',
                     });
                     setShowEditModal(true);
                   }}
@@ -433,6 +447,17 @@ export default function Profile() {
               />
             </div>
             <div className="form-group">
+              <label className="form-label">Target GATE Track</label>
+              <select
+                className="form-select"
+                value={editForm.gate_paper}
+                onChange={e => setEditForm(f => ({ ...f, gate_paper: e.target.value as any }))}
+              >
+                <option value="CS">GATE CS — Computer Science & IT (CSE/IT)</option>
+                <option value="EC">GATE EC — Electronics & Communication (ENTC/ECE)</option>
+              </select>
+            </div>
+            <div className="form-group">
               <label className="form-label">Target GATE Year</label>
               <select
                 className="form-select"
@@ -441,7 +466,7 @@ export default function Profile() {
               >
                 {[0, 1, 2, 3].map(o => {
                   const y = new Date().getFullYear() + o;
-                  return <option key={y} value={y}>GATE {y}</option>;
+                  return <option key={y} value={y}>GATE {editForm.gate_paper || 'CS'} {y}</option>;
                 })}
               </select>
             </div>
@@ -450,7 +475,7 @@ export default function Profile() {
               <textarea
                 className="form-textarea"
                 rows={3}
-                placeholder="Targeting Top 100 AIR in GATE CSE..."
+                placeholder="Targeting Top 100 AIR in GATE..."
                 value={editForm.bio}
                 onChange={e => setEditForm(f => ({ ...f, bio: e.target.value }))}
               />

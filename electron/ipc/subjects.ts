@@ -2,10 +2,33 @@ import { ipcMain } from 'electron';
 import { getDatabase } from '../database/connection';
 import { log } from '../utils/logger';
 
+export function getActiveGatePaper(db: any, explicitPaper?: string): string {
+  if (explicitPaper && explicitPaper !== 'ALL') return explicitPaper;
+  try {
+    const setting = db.prepare("SELECT value FROM settings WHERE key = 'gate_paper'").get() as any;
+    if (setting?.value) return setting.value;
+  } catch (_) {}
+  return 'CS';
+}
+
 export function registerSubjectHandlers(): void {
   const db = getDatabase();
 
-  ipcMain.handle('subjects:getAll', () => {
+  ipcMain.handle('subjects:getAll', (_e, paper?: string) => {
+    const activePaper = getActiveGatePaper(db, paper);
+    if (paper === 'ALL') {
+      return db.prepare(`
+        SELECT s.*, 
+          (SELECT COUNT(*) FROM topics WHERE subject_id = s.id) as topic_count,
+          (SELECT COUNT(*) FROM topics WHERE subject_id = s.id AND status = 'completed') as completed_topics,
+          (SELECT COALESCE(SUM(duration_seconds), 0) FROM study_sessions WHERE subject_id = s.id AND is_active = 0) as total_study_seconds,
+          (SELECT COUNT(*) FROM questions WHERE subject_id = s.id) as total_questions,
+          (SELECT COUNT(*) FROM questions WHERE subject_id = s.id AND is_correct = 1) as correct_questions
+        FROM subjects s 
+        WHERE s.is_archived = 0 
+        ORDER BY s.display_order, s.id
+      `).all();
+    }
     return db.prepare(`
       SELECT s.*, 
         (SELECT COUNT(*) FROM topics WHERE subject_id = s.id) as topic_count,
@@ -14,9 +37,9 @@ export function registerSubjectHandlers(): void {
         (SELECT COUNT(*) FROM questions WHERE subject_id = s.id) as total_questions,
         (SELECT COUNT(*) FROM questions WHERE subject_id = s.id AND is_correct = 1) as correct_questions
       FROM subjects s 
-      WHERE s.is_archived = 0 
+      WHERE s.is_archived = 0 AND (s.gate_paper = ? OR s.gate_paper = 'SHARED' OR s.gate_paper = 'ALL')
       ORDER BY s.display_order, s.id
-    `).all();
+    `).all(activePaper);
   });
 
   ipcMain.handle('subjects:getById', (_e, id: number) => {
@@ -32,10 +55,11 @@ export function registerSubjectHandlers(): void {
   });
 
   ipcMain.handle('subjects:create', (_e, data: any) => {
+    const activePaper = data.gate_paper || getActiveGatePaper(db);
     const maxOrder = db.prepare('SELECT MAX(display_order) as max_order FROM subjects').get() as any;
     const result = db.prepare(
-      'INSERT INTO subjects (name, color, display_order) VALUES (?, ?, ?)'
-    ).run(data.name, data.color || '#3B82F6', (maxOrder?.max_order || 0) + 1);
+      'INSERT INTO subjects (name, color, display_order, gate_paper) VALUES (?, ?, ?, ?)'
+    ).run(data.name, data.color || '#3B82F6', (maxOrder?.max_order || 0) + 1, activePaper);
     return db.prepare('SELECT * FROM subjects WHERE id = ?').get(result.lastInsertRowid);
   });
 
@@ -44,6 +68,7 @@ export function registerSubjectHandlers(): void {
     const values: any[] = [];
     if (data.name !== undefined) { sets.push('name = ?'); values.push(data.name); }
     if (data.color !== undefined) { sets.push('color = ?'); values.push(data.color); }
+    if (data.gate_paper !== undefined) { sets.push('gate_paper = ?'); values.push(data.gate_paper); }
     if (data.is_archived !== undefined) { sets.push('is_archived = ?'); values.push(data.is_archived ? 1 : 0); }
     sets.push("updated_at = datetime('now')");
     values.push(id);

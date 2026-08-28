@@ -41,10 +41,31 @@ function createWindow(): void {
     mainWindow?.show();
   });
 
-  // Prevent external navigation
+  // Prevent external navigation and safely open verified http(s) links in default browser
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
-    shell.openExternal(url);
+    try {
+      const parsed = new URL(url);
+      if (parsed.protocol === 'https:' || parsed.protocol === 'http:') {
+        shell.openExternal(url);
+      }
+    } catch (_) {}
     return { action: 'deny' };
+  });
+
+  mainWindow.webContents.on('will-navigate', (event, url) => {
+    if (VITE_DEV_SERVER_URL && url.startsWith(VITE_DEV_SERVER_URL)) {
+      return;
+    }
+    const currentUrl = mainWindow?.webContents.getURL();
+    if (url !== currentUrl && !url.startsWith('file://')) {
+      event.preventDefault();
+      try {
+        const parsed = new URL(url);
+        if (parsed.protocol === 'https:' || parsed.protocol === 'http:') {
+          shell.openExternal(url);
+        }
+      } catch (_) {}
+    }
   });
 
   if (VITE_DEV_SERVER_URL) {

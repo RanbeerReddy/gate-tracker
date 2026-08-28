@@ -20,6 +20,8 @@ export default function Community() {
 
   const [posts, setPosts] = useState<CommunityPost[]>([]);
   const [filter, setFilter] = useState<'latest' | 'popular'>('latest');
+  const [paperFilter, setPaperFilter] = useState<'all' | 'CS' | 'EC'>('all');
+  const [activePaper, setActivePaper] = useState<string>('CS');
   const [loading, setLoading] = useState(true);
   const [subjects, setSubjects] = useState<Subject[]>([]);
 
@@ -42,13 +44,16 @@ export default function Community() {
 
   const loadPosts = useCallback(async () => {
     setLoading(true);
-    const data = await fetchCommunityPosts(0, 25, filter);
+    const data = await fetchCommunityPosts(0, 25, filter, paperFilter);
     setPosts(data);
     setLoading(false);
-  }, [filter]);
+  }, [filter, paperFilter]);
 
   useEffect(() => {
     loadPosts();
+    window.electronAPI.settings.get('gate_paper').then(p => {
+      if (p) setActivePaper(p);
+    }).catch(() => {});
     window.electronAPI.subjects.getAll().then(setSubjects).catch(() => {});
     window.electronAPI.analytics.getDashboard().then(d => {
       setTodayStats(d.today);
@@ -77,10 +82,12 @@ export default function Community() {
       };
     }
 
+    const postTrack = profile?.gate_paper || activePaper || 'CS';
     const created = await createCommunityPost(
       newContent,
       selectedSubject || null,
-      sharedStatsPayload
+      sharedStatsPayload,
+      postTrack
     );
 
     setIsSubmitting(false);
@@ -294,20 +301,43 @@ export default function Community() {
         </div>
       )}
 
-      {/* Feed Filters */}
-      <div className="tabs mb-4">
-        <button
-          className={`tab ${filter === 'latest' ? 'active' : ''}`}
-          onClick={() => setFilter('latest')}
-        >
-          ⏱️ Latest Posts
-        </button>
-        <button
-          className={`tab ${filter === 'popular' ? 'active' : ''}`}
-          onClick={() => setFilter('popular')}
-        >
-          🔥 Popular
-        </button>
+      {/* Feed Filters & Track Filter */}
+      <div className="flex items-center justify-between flex-wrap gap-3 mb-4">
+        <div className="tabs mb-0">
+          <button
+            className={`tab ${filter === 'latest' ? 'active' : ''}`}
+            onClick={() => setFilter('latest')}
+          >
+            ⏱️ Latest
+          </button>
+          <button
+            className={`tab ${filter === 'popular' ? 'active' : ''}`}
+            onClick={() => setFilter('popular')}
+          >
+            🔥 Popular
+          </button>
+        </div>
+
+        <div className="flex items-center gap-1">
+          <button
+            className={`btn btn-sm ${paperFilter === 'all' ? 'btn-primary' : 'btn-ghost'}`}
+            onClick={() => setPaperFilter('all')}
+          >
+            All Papers
+          </button>
+          <button
+            className={`btn btn-sm ${paperFilter === 'CS' ? 'btn-primary' : 'btn-ghost'}`}
+            onClick={() => setPaperFilter('CS')}
+          >
+            GATE CS
+          </button>
+          <button
+            className={`btn btn-sm ${paperFilter === 'EC' ? 'btn-primary' : 'btn-ghost'}`}
+            onClick={() => setPaperFilter('EC')}
+          >
+            GATE EC
+          </button>
+        </div>
       </div>
 
       {/* Posts List */}
@@ -328,6 +358,7 @@ export default function Community() {
           {posts.map(post => {
             const author = post.author;
             const isOwnPost = user?.id === post.user_id;
+            const postPaper = post.gate_paper || author?.gate_paper || 'CS';
 
             return (
               <div key={post.id} className="card" style={{ padding: 'var(--space-4)' }}>
@@ -359,9 +390,21 @@ export default function Community() {
                       )}
                     </div>
                     <div>
-                      <div className="font-semibold text-sm">
-                        {author?.display_name || `@${author?.username || 'user'}`}
-                        <span className="text-xs text-tertiary ml-2">@{author?.username}</span>
+                      <div className="font-semibold text-sm flex items-center gap-2">
+                        <span>{author?.display_name || `@${author?.username || 'user'}`}</span>
+                        <span className="text-xs text-tertiary">@{author?.username}</span>
+                        <span
+                          className="tag"
+                          style={{
+                            background: postPaper === 'EC' ? 'rgba(16, 185, 129, 0.15)' : 'rgba(59, 130, 246, 0.15)',
+                            color: postPaper === 'EC' ? '#10B981' : '#3B82F6',
+                            fontSize: '10px',
+                            padding: '1px 6px',
+                            fontWeight: 600,
+                          }}
+                        >
+                          {postPaper === 'EC' ? 'GATE EC' : 'GATE CS'}
+                        </span>
                       </div>
                       <div className="text-xs text-tertiary">
                         {new Date(post.created_at).toLocaleDateString(undefined, {

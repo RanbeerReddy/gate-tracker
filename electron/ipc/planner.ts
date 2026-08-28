@@ -1,10 +1,12 @@
 import { ipcMain } from 'electron';
 import { getDatabase } from '../database/connection';
+import { getActiveGatePaper } from './subjects';
 
 export function registerPlannerHandlers(): void {
   const db = getDatabase();
 
-  ipcMain.handle('planner:getByDate', (_e, date: string) => {
+  ipcMain.handle('planner:getByDate', (_e, date: string, paper?: string) => {
+    const activePaper = getActiveGatePaper(db, paper);
     return db.prepare(`
       SELECT ps.*, 
         s.name as subject_name, s.color as subject_color,
@@ -14,16 +16,18 @@ export function registerPlannerHandlers(): void {
       LEFT JOIN topics t ON ps.topic_id = t.id
       LEFT JOIN subtopics st ON ps.subtopic_id = st.id
       WHERE ps.date = ?
+        AND (s.id IS NULL OR s.gate_paper = ? OR s.gate_paper = 'SHARED' OR s.gate_paper = 'ALL')
       ORDER BY ps.start_time ASC
-    `).all(date);
+    `).all(date, activePaper);
   });
 
   ipcMain.handle('planner:create', (_e, data: any) => {
+    const activePaper = data.gate_paper || getActiveGatePaper(db);
     const result = db.prepare(`
-      INSERT INTO planned_sessions (date, subject_id, topic_id, subtopic_id, activity_type, start_time, end_time, notes)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO planned_sessions (date, subject_id, topic_id, subtopic_id, activity_type, start_time, end_time, gate_paper, notes)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(data.date, data.subject_id, data.topic_id || null, data.subtopic_id || null,
-      data.activity_type || 'learning', data.start_time, data.end_time, data.notes || null);
+      data.activity_type || 'learning', data.start_time, data.end_time, activePaper, data.notes || null);
     return db.prepare('SELECT * FROM planned_sessions WHERE id = ?').get(result.lastInsertRowid);
   });
 

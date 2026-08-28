@@ -93,7 +93,49 @@ export default function Settings() {
       </div>
 
       {tab === 'general' && (
-        <div style={{ maxWidth: '500px' }}>
+        <div style={{ maxWidth: '580px' }}>
+          {/* GATE Paper Track Selection */}
+          <div className="card mb-6" style={{ borderLeft: '4px solid var(--accent)', padding: 'var(--space-4)' }}>
+            <div className="flex items-center justify-between mb-2">
+              <label className="form-label mb-0" style={{ fontSize: 'var(--text-base)', fontWeight: 600 }}>
+                🎯 Active GATE Track
+              </label>
+              <span className="tag" style={{
+                background: settings.gate_paper === 'EC' ? '#10B981' : '#3B82F6',
+                color: '#fff',
+                fontWeight: 600
+              }}>
+                {settings.gate_paper === 'EC' ? 'GATE EC' : 'GATE CS'}
+              </span>
+            </div>
+
+            <select
+              className="form-select mb-2"
+              value={settings.gate_paper || 'CS'}
+              onChange={async e => {
+                const newPaper = e.target.value;
+                await window.electronAPI.settings.set('gate_paper', newPaper);
+                const year = settings.target_gate_year || '2027';
+                const currentExamName = settings.gate_exam_name || '';
+                if (currentExamName.includes('GATE CS') || currentExamName.includes('GATE CSE') || currentExamName.includes('GATE EC')) {
+                  const newExamName = newPaper === 'EC' ? `GATE EC ${year}` : `GATE CS ${year}`;
+                  await window.electronAPI.settings.set('gate_exam_name', newExamName);
+                  setSettings(s => ({ ...s, gate_paper: newPaper, gate_exam_name: newExamName }));
+                } else {
+                  setSettings(s => ({ ...s, gate_paper: newPaper }));
+                }
+                addToast(`Switched to GATE ${newPaper} track`, 'success');
+              }}
+            >
+              <option value="CS">GATE CS — Computer Science & Information Technology (CSE / IT)</option>
+              <option value="EC">GATE EC — Electronics & Communication Engineering (ENTC / ECE)</option>
+            </select>
+
+            <div className="text-xs text-secondary leading-relaxed">
+              💡 Switching papers dynamically switches your syllabus, dashboard analytics, and question filters. Your existing study logs and progress are safely preserved.
+            </div>
+          </div>
+
           <div className="form-group">
             <label className="form-label">Theme</label>
             <div className="flex gap-2">
@@ -111,14 +153,20 @@ export default function Settings() {
             <select className="form-select" value={settings.target_gate_year || ''} onChange={e => updateSetting('target_gate_year', e.target.value)}>
               {[0, 1, 2, 3].map(offset => {
                 const y = new Date().getFullYear() + offset;
-                return <option key={y} value={y}>GATE {y}</option>;
+                return <option key={y} value={y}>GATE {settings.gate_paper || 'CS'} {y}</option>;
               })}
             </select>
           </div>
 
-          <div className="form-group">
-            <label className="form-label">Target Score</label>
-            <input className="form-input" value={settings.target_score || ''} onChange={e => updateSetting('target_score', e.target.value)} placeholder="e.g. 75" />
+          <div className="grid grid-2 gap-4">
+            <div className="form-group">
+              <label className="form-label">Target Score</label>
+              <input className="form-input" value={settings.target_score || ''} onChange={e => updateSetting('target_score', e.target.value)} placeholder="e.g. 75" />
+            </div>
+            <div className="form-group">
+              <label className="form-label">Target Rank (AIR)</label>
+              <input className="form-input" value={settings.target_rank || ''} onChange={e => updateSetting('target_rank', e.target.value)} placeholder="e.g. 300" />
+            </div>
           </div>
         </div>
       )}
@@ -129,9 +177,9 @@ export default function Settings() {
             <label className="form-label">Target GATE Exam Name</label>
             <input
               className="form-input"
-              value={settings.gate_exam_name || 'GATE CSE 2027'}
+              value={settings.gate_exam_name || (settings.gate_paper === 'EC' ? 'GATE EC 2027' : 'GATE CS 2027')}
               onChange={e => updateSetting('gate_exam_name', e.target.value)}
-              placeholder="e.g. GATE CSE 2027"
+              placeholder={settings.gate_paper === 'EC' ? 'GATE EC 2027' : 'GATE CS 2027'}
             />
           </div>
 
@@ -141,7 +189,7 @@ export default function Settings() {
               type="date"
               className="form-input"
               value={settings.gate_exam_date || '2027-02-07'}
-              onChange={e => handleUpdateExam(e.target.value, settings.gate_exam_name || 'GATE CSE 2027')}
+              onChange={e => handleUpdateExam(e.target.value, settings.gate_exam_name || (settings.gate_paper === 'EC' ? 'GATE EC 2027' : 'GATE CS 2027'))}
             />
             <div className="text-xs text-tertiary mt-2">
               The Study Calendar and Dashboard countdown will automatically adapt to this date, highlighting the corresponding exam month and placing a star marker on exam day.
@@ -210,10 +258,10 @@ export default function Settings() {
         <div style={{ maxWidth: '500px' }}>
           <div className="card">
             <div className="font-bold" style={{ fontSize: 'var(--text-lg)', marginBottom: 'var(--space-3)' }}>
-              GATE Tracker v1.1.0
+              GATE Tracker v1.2.0 (Multi-Paper Edition)
             </div>
             <div className="text-sm text-secondary" style={{ marginBottom: 'var(--space-4)' }}>
-              Your personal GATE CSE preparation operating system + Community layer. All personal study data stored locally.
+              Your personal Multi-Paper GATE preparation operating system (GATE CS & GATE EC tracks) + Community layer. All personal study data stored locally.
             </div>
             {dbInfo && (
               <div style={{ display: 'grid', gap: 'var(--space-2)' }}>

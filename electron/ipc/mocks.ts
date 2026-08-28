@@ -1,18 +1,20 @@
 import { ipcMain } from 'electron';
 import { getDatabase } from '../database/connection';
+import { getActiveGatePaper } from './subjects';
 
 export function registerMockHandlers(): void {
   const db = getDatabase();
 
   ipcMain.handle('mocks:create', (_e, data: any) => {
+    const activePaper = data.gate_paper || getActiveGatePaper(db);
     const result = db.prepare(`
-      INSERT INTO mock_tests (date, test_name, total_marks, score, attempted, correct, wrong, unattempted, negative_marks, time_minutes, notes)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO mock_tests (date, test_name, total_marks, score, attempted, correct, wrong, unattempted, negative_marks, time_minutes, gate_paper, notes)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       data.date, data.test_name, data.total_marks || 100,
       data.score || 0, data.attempted || 0, data.correct || 0,
       data.wrong || 0, data.unattempted || 0, data.negative_marks || 0,
-      data.time_minutes || null, data.notes || null
+      data.time_minutes || null, activePaper, data.notes || null
     );
     
     const mockId = result.lastInsertRowid as number;
@@ -32,8 +34,12 @@ export function registerMockHandlers(): void {
     return db.prepare('SELECT * FROM mock_tests WHERE id = ?').get(mockId);
   });
 
-  ipcMain.handle('mocks:getAll', () => {
-    return db.prepare('SELECT * FROM mock_tests ORDER BY date DESC').all();
+  ipcMain.handle('mocks:getAll', (_e, paper?: string) => {
+    const activePaper = getActiveGatePaper(db, paper);
+    if (paper === 'ALL') {
+      return db.prepare('SELECT * FROM mock_tests ORDER BY date DESC').all();
+    }
+    return db.prepare('SELECT * FROM mock_tests WHERE (gate_paper = ? OR gate_paper = \'ALL\') ORDER BY date DESC').all(activePaper);
   });
 
   ipcMain.handle('mocks:getById', (_e, id: number) => {
@@ -51,7 +57,7 @@ export function registerMockHandlers(): void {
     const sets: string[] = [];
     const values: any[] = [];
     const fields = ['date', 'test_name', 'total_marks', 'score', 'attempted', 'correct',
-      'wrong', 'unattempted', 'negative_marks', 'time_minutes', 'notes'];
+      'wrong', 'unattempted', 'negative_marks', 'time_minutes', 'gate_paper', 'notes'];
     
     for (const field of fields) {
       if (data[field] !== undefined) { sets.push(`${field} = ?`); values.push(data[field]); }
@@ -81,3 +87,4 @@ export function registerMockHandlers(): void {
     db.prepare('DELETE FROM mock_tests WHERE id = ?').run(id);
   });
 }
+

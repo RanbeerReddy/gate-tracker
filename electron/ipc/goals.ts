@@ -1,25 +1,32 @@
 import { ipcMain } from 'electron';
 import { getDatabase } from '../database/connection';
 import { formatLocalDate, getStartOfWeek, getStartOfMonth } from '../utils/dates';
+import { getActiveGatePaper } from './subjects';
 
 export function registerGoalHandlers(): void {
   const db = getDatabase();
 
   ipcMain.handle('goals:create', (_e, data: any) => {
+    const activePaper = data.gate_paper || getActiveGatePaper(db);
     const result = db.prepare(`
-      INSERT INTO goals (type, metric, target_value, start_date, end_date, notes)
-      VALUES (?, ?, ?, ?, ?, ?)
+      INSERT INTO goals (type, metric, target_value, start_date, end_date, gate_paper, notes)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
     `).run(data.type, data.metric, data.target_value,
-      data.start_date || null, data.end_date || null, data.notes || null);
+      data.start_date || null, data.end_date || null, activePaper, data.notes || null);
     return db.prepare('SELECT * FROM goals WHERE id = ?').get(result.lastInsertRowid);
   });
 
-  ipcMain.handle('goals:getAll', () => {
-    return db.prepare('SELECT * FROM goals ORDER BY created_at DESC').all();
+  ipcMain.handle('goals:getAll', (_e, paper?: string) => {
+    const activePaper = getActiveGatePaper(db, paper);
+    if (paper === 'ALL') {
+      return db.prepare('SELECT * FROM goals ORDER BY created_at DESC').all();
+    }
+    return db.prepare('SELECT * FROM goals WHERE (gate_paper = ? OR gate_paper = \'ALL\') ORDER BY created_at DESC').all(activePaper);
   });
 
-  ipcMain.handle('goals:getActive', () => {
-    const goals = db.prepare('SELECT * FROM goals WHERE is_active = 1 ORDER BY type, metric').all() as any[];
+  ipcMain.handle('goals:getActive', (_e, paper?: string) => {
+    const activePaper = getActiveGatePaper(db, paper);
+    const goals = db.prepare('SELECT * FROM goals WHERE is_active = 1 AND (gate_paper = ? OR gate_paper = \'ALL\') ORDER BY type, metric').all(activePaper) as any[];
     const today = formatLocalDate(new Date());
     const weekStart = getStartOfWeek(new Date());
     const monthStart = getStartOfMonth(new Date());
@@ -27,51 +34,64 @@ export function registerGoalHandlers(): void {
     // Calculate current progress for each goal
     return goals.map(goal => {
       let currentValue = 0;
+      const targetPaper = goal.gate_paper && goal.gate_paper !== 'ALL' ? goal.gate_paper : activePaper;
       
       if (goal.type === 'daily') {
         if (goal.metric === 'study_hours') {
           const result = db.prepare(`
-            SELECT COALESCE(SUM(duration_seconds), 0) / 3600.0 as hours
-            FROM study_sessions WHERE date(start_time) = ? AND is_active = 0
-          `).get(today) as any;
+            SELECT COALESCE(SUM(ss.duration_seconds), 0) / 3600.0 as hours
+            FROM study_sessions ss
+            LEFT JOIN subjects s ON ss.subject_id = s.id
+            WHERE date(ss.start_time) = ? AND ss.is_active = 0
+              AND (s.id IS NULL OR s.gate_paper = ? OR s.gate_paper = 'SHARED' OR s.gate_paper = 'ALL')
+          `).get(today, targetPaper) as any;
           currentValue = result.hours || 0;
         } else if (goal.metric === 'questions') {
           const result = db.prepare(`
-            SELECT COUNT(*) as count FROM questions WHERE date(created_at) = ?
-          `).get(today) as any;
+            SELECT COUNT(*) as count FROM questions q
+            LEFT JOIN subjects s ON q.subject_id = s.id
+            WHERE date(q.created_at) = ?
+              AND (s.id IS NULL OR s.gate_paper = ? OR s.gate_paper = 'SHARED' OR s.gate_paper = 'ALL')
+          `).get(today, targetPaper) as any;
           currentValue = result.count || 0;
         }
       } else if (goal.type === 'weekly') {
         // Standard Monday -> Sunday calendar week
         if (goal.metric === 'study_hours') {
           const result = db.prepare(`
-            SELECT COALESCE(SUM(duration_seconds), 0) / 3600.0 as hours
-            FROM study_sessions 
-            WHERE date(start_time) >= ?
-            AND is_active = 0
-          `).get(weekStart) as any;
+            SELECT COALESCE(SUM(ss.duration_seconds), 0) / 3600.0 as hours
+            FROM study_sessions ss
+            LEFT JOIN subjects s ON ss.subject_id = s.id
+            WHERE date(ss.start_time) >= ? AND ss.is_active = 0
+              AND (s.id IS NULL OR s.gate_paper = ? OR s.gate_paper = 'SHARED' OR s.gate_paper = 'ALL')
+          `).get(weekStart, targetPaper) as any;
           currentValue = result.hours || 0;
         } else if (goal.metric === 'questions') {
           const result = db.prepare(`
-            SELECT COUNT(*) as count FROM questions 
-            WHERE date(created_at) >= ?
-          `).get(weekStart) as any;
+            SELECT COUNT(*) as count FROM questions q
+            LEFT JOIN subjects s ON q.subject_id = s.id
+            WHERE date(q.created_at) >= ?
+              AND (s.id IS NULL OR s.gate_paper = ? OR s.gate_paper = 'SHARED' OR s.gate_paper = 'ALL')
+          `).get(weekStart, targetPaper) as any;
           currentValue = result.count || 0;
         }
       } else if (goal.type === 'monthly') {
         if (goal.metric === 'study_hours') {
           const result = db.prepare(`
-            SELECT COALESCE(SUM(duration_seconds), 0) / 3600.0 as hours
-            FROM study_sessions 
-            WHERE date(start_time) >= ?
-            AND is_active = 0
-          `).get(monthStart) as any;
+            SELECT COALESCE(SUM(ss.duration_seconds), 0) / 3600.0 as hours
+            FROM study_sessions ss
+            LEFT JOIN subjects s ON ss.subject_id = s.id
+            WHERE date(ss.start_time) >= ? AND ss.is_active = 0
+              AND (s.id IS NULL OR s.gate_paper = ? OR s.gate_paper = 'SHARED' OR s.gate_paper = 'ALL')
+          `).get(monthStart, targetPaper) as any;
           currentValue = result.hours || 0;
         } else if (goal.metric === 'questions') {
           const result = db.prepare(`
-            SELECT COUNT(*) as count FROM questions 
-            WHERE date(created_at) >= ?
-          `).get(monthStart) as any;
+            SELECT COUNT(*) as count FROM questions q
+            LEFT JOIN subjects s ON q.subject_id = s.id
+            WHERE date(q.created_at) >= ?
+              AND (s.id IS NULL OR s.gate_paper = ? OR s.gate_paper = 'SHARED' OR s.gate_paper = 'ALL')
+          `).get(monthStart, targetPaper) as any;
           currentValue = result.count || 0;
         }
       }
@@ -83,7 +103,7 @@ export function registerGoalHandlers(): void {
   ipcMain.handle('goals:update', (_e, id: number, data: any) => {
     const sets: string[] = [];
     const values: any[] = [];
-    const fields = ['type', 'metric', 'target_value', 'start_date', 'end_date', 'is_active', 'notes'];
+    const fields = ['type', 'metric', 'target_value', 'start_date', 'end_date', 'is_active', 'gate_paper', 'notes'];
     for (const field of fields) {
       if (data[field] !== undefined) { sets.push(`${field} = ?`); values.push(data[field]); }
     }
@@ -99,10 +119,11 @@ export function registerGoalHandlers(): void {
 
   // Phases
   ipcMain.handle('phases:create', (_e, data: any) => {
+    const activePaper = data.gate_paper || getActiveGatePaper(db);
     const result = db.prepare(`
-      INSERT INTO phases (name, start_date, end_date, notes, is_active)
-      VALUES (?, ?, ?, ?, ?)
-    `).run(data.name, data.start_date, data.end_date, data.notes || null, data.is_active ? 1 : 0);
+      INSERT INTO phases (name, start_date, end_date, notes, is_active, gate_paper)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `).run(data.name, data.start_date, data.end_date, data.notes || null, data.is_active ? 1 : 0, activePaper);
     
     const phaseId = result.lastInsertRowid as number;
     
@@ -118,8 +139,11 @@ export function registerGoalHandlers(): void {
     return db.prepare('SELECT * FROM phases WHERE id = ?').get(phaseId);
   });
 
-  ipcMain.handle('phases:getAll', () => {
-    const phases = db.prepare('SELECT * FROM phases ORDER BY start_date ASC').all() as any[];
+  ipcMain.handle('phases:getAll', (_e, paper?: string) => {
+    const activePaper = getActiveGatePaper(db, paper);
+    const where = paper === 'ALL' ? '' : 'WHERE (gate_paper = ? OR gate_paper = \'ALL\')';
+    const params = paper === 'ALL' ? [] : [activePaper];
+    const phases = db.prepare(`SELECT * FROM phases ${where} ORDER BY start_date ASC`).all(...params) as any[];
     return phases.map(phase => {
       const subjects = db.prepare(`
         SELECT ps.*, s.name as subject_name, s.color as subject_color
@@ -145,7 +169,7 @@ export function registerGoalHandlers(): void {
   ipcMain.handle('phases:update', (_e, id: number, data: any) => {
     const sets: string[] = [];
     const values: any[] = [];
-    const fields = ['name', 'start_date', 'end_date', 'notes', 'is_active'];
+    const fields = ['name', 'start_date', 'end_date', 'notes', 'is_active', 'gate_paper'];
     for (const field of fields) {
       if (data[field] !== undefined) { sets.push(`${field} = ?`); values.push(data[field]); }
     }
@@ -160,3 +184,4 @@ export function registerGoalHandlers(): void {
     db.prepare('DELETE FROM phases WHERE id = ?').run(id);
   });
 }
+

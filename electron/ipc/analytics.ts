@@ -1,65 +1,78 @@
 import { ipcMain } from 'electron';
 import { getDatabase } from '../database/connection';
 import { formatLocalDate, getStartOfWeek } from '../utils/dates';
+import { getActiveGatePaper } from './subjects';
 
 export function registerAnalyticsHandlers(): void {
   const db = getDatabase();
 
-  ipcMain.handle('analytics:getDashboard', () => {
+  ipcMain.handle('analytics:getDashboard', (_e, paper?: string) => {
+    const activePaper = getActiveGatePaper(db, paper);
     const today = formatLocalDate(new Date());
     const weekStart = getStartOfWeek(new Date());
     
-    // Today's stats
+    // Today's stats for active paper
     const todayStudy = db.prepare(`
-      SELECT COALESCE(SUM(duration_seconds), 0) as total_seconds,
+      SELECT COALESCE(SUM(ss.duration_seconds), 0) as total_seconds,
         COUNT(*) as session_count,
-        COALESCE(SUM(questions_solved), 0) as questions_solved
-      FROM study_sessions
-      WHERE date(start_time) = ? AND is_active = 0
-    `).get(today) as any;
+        COALESCE(SUM(ss.questions_solved), 0) as questions_solved
+      FROM study_sessions ss
+      LEFT JOIN subjects s ON ss.subject_id = s.id
+      WHERE date(ss.start_time) = ? AND ss.is_active = 0
+        AND (s.id IS NULL OR s.gate_paper = ? OR s.gate_paper = 'SHARED' OR s.gate_paper = 'ALL')
+    `).get(today, activePaper) as any;
 
     const todayQuestions = db.prepare(`
       SELECT COUNT(*) as total,
-        COUNT(CASE WHEN is_correct = 1 THEN 1 END) as correct
-      FROM questions WHERE date(created_at) = ?
-    `).get(today) as any;
+        COUNT(CASE WHEN q.is_correct = 1 THEN 1 END) as correct
+      FROM questions q
+      LEFT JOIN subjects s ON q.subject_id = s.id
+      WHERE date(q.created_at) = ?
+        AND (s.id IS NULL OR s.gate_paper = ? OR s.gate_paper = 'SHARED' OR s.gate_paper = 'ALL')
+    `).get(today, activePaper) as any;
 
     const todaySubjects = db.prepare(`
       SELECT DISTINCT s.name, s.color
       FROM study_sessions ss
       JOIN subjects s ON ss.subject_id = s.id
       WHERE date(ss.start_time) = ? AND ss.is_active = 0
-    `).all(today);
+        AND (s.gate_paper = ? OR s.gate_paper = 'SHARED' OR s.gate_paper = 'ALL')
+    `).all(today, activePaper);
 
-    // Current Week stats (Monday -> Sunday calendar week)
+    // Current Week stats
     const weekStudy = db.prepare(`
-      SELECT COALESCE(SUM(duration_seconds), 0) as total_seconds,
-        COUNT(DISTINCT date(start_time)) as days_studied,
+      SELECT COALESCE(SUM(ss.duration_seconds), 0) as total_seconds,
+        COUNT(DISTINCT date(ss.start_time)) as days_studied,
         COUNT(*) as session_count
-      FROM study_sessions
-      WHERE date(start_time) >= ? AND is_active = 0
-    `).get(weekStart) as any;
+      FROM study_sessions ss
+      LEFT JOIN subjects s ON ss.subject_id = s.id
+      WHERE date(ss.start_time) >= ? AND ss.is_active = 0
+        AND (s.id IS NULL OR s.gate_paper = ? OR s.gate_paper = 'SHARED' OR s.gate_paper = 'ALL')
+    `).get(weekStart, activePaper) as any;
 
     const weekQuestions = db.prepare(`
       SELECT COUNT(*) as total,
-        COUNT(CASE WHEN is_correct = 1 THEN 1 END) as correct
-      FROM questions WHERE date(created_at) >= ?
-    `).get(weekStart) as any;
+        COUNT(CASE WHEN q.is_correct = 1 THEN 1 END) as correct
+      FROM questions q
+      LEFT JOIN subjects s ON q.subject_id = s.id
+      WHERE date(q.created_at) >= ?
+        AND (s.id IS NULL OR s.gate_paper = ? OR s.gate_paper = 'SHARED' OR s.gate_paper = 'ALL')
+    `).get(weekStart, activePaper) as any;
 
-    // Syllabus completion
+    // Syllabus completion for active paper
     const syllabusStats = db.prepare(`
       SELECT 
         COUNT(*) as total_topics,
-        COUNT(CASE WHEN status = 'completed' OR status = 'strong' THEN 1 END) as completed,
-        COUNT(CASE WHEN status = 'learning' THEN 1 END) as learning,
-        COUNT(CASE WHEN status = 'needs_revision' THEN 1 END) as needs_revision,
-        COUNT(CASE WHEN status = 'not_started' THEN 1 END) as not_started
+        COUNT(CASE WHEN t.status = 'completed' OR t.status = 'strong' THEN 1 END) as completed,
+        COUNT(CASE WHEN t.status = 'learning' THEN 1 END) as learning,
+        COUNT(CASE WHEN t.status = 'needs_revision' THEN 1 END) as needs_revision,
+        COUNT(CASE WHEN t.status = 'not_started' THEN 1 END) as not_started
       FROM topics t
       JOIN subjects s ON t.subject_id = s.id
-      WHERE s.is_archived = 0
-    `).get() as any;
+      WHERE s.is_archived = 0 AND (s.gate_paper = ? OR s.gate_paper = 'SHARED' OR s.gate_paper = 'ALL')
+    `).get(activePaper) as any;
 
-    // Subject completion
+    // Subject completion for active paper
     const subjectCompletion = db.prepare(`
       SELECT s.id, s.name, s.color,
         COUNT(t.id) as total_topics,
@@ -67,28 +80,33 @@ export function registerAnalyticsHandlers(): void {
         (SELECT COALESCE(SUM(duration_seconds), 0) FROM study_sessions WHERE subject_id = s.id AND is_active = 0) as total_seconds
       FROM subjects s
       LEFT JOIN topics t ON t.subject_id = s.id
-      WHERE s.is_archived = 0
+      WHERE s.is_archived = 0 AND (s.gate_paper = ? OR s.gate_paper = 'SHARED' OR s.gate_paper = 'ALL')
       GROUP BY s.id
       ORDER BY s.display_order
-    `).all();
+    `).all(activePaper);
 
-    // Recent mock scores
+    // Recent mock scores for active paper
     const recentMocks = db.prepare(`
       SELECT date, test_name, score, total_marks,
         ROUND(CAST(correct AS REAL) / NULLIF(attempted, 0) * 100, 1) as accuracy
-      FROM mock_tests ORDER BY date DESC LIMIT 5
-    `).all();
+      FROM mock_tests
+      WHERE (gate_paper = ? OR gate_paper = 'ALL')
+      ORDER BY date DESC LIMIT 5
+    `).all(activePaper);
 
-    // Revision due count
+    // Revision due count for active paper
     const revisionDue = db.prepare(`
       SELECT COUNT(DISTINCT r.topic_id) as count
       FROM revisions r
+      JOIN topics t ON r.topic_id = t.id
+      JOIN subjects s ON t.subject_id = s.id
       INNER JOIN (SELECT topic_id, MAX(id) as max_id FROM revisions GROUP BY topic_id) latest
         ON r.id = latest.max_id
       WHERE r.next_revision_date <= date('now')
-    `).get() as any;
+        AND s.is_archived = 0 AND (s.gate_paper = ? OR s.gate_paper = 'SHARED' OR s.gate_paper = 'ALL')
+    `).get(activePaper) as any;
 
-    // Weak topics (low accuracy, recent poor performance)
+    // Weak topics (low accuracy, recent poor performance) for active paper
     const weakTopics = db.prepare(`
       SELECT t.id, t.name as topic_name, s.name as subject_name, s.color,
         COUNT(q.id) as total_questions,
@@ -97,52 +115,56 @@ export function registerAnalyticsHandlers(): void {
       FROM topics t
       JOIN subjects s ON t.subject_id = s.id
       LEFT JOIN questions q ON q.topic_id = t.id
-      WHERE s.is_archived = 0
+      WHERE s.is_archived = 0 AND (s.gate_paper = ? OR s.gate_paper = 'SHARED' OR s.gate_paper = 'ALL')
       GROUP BY t.id
       HAVING COUNT(q.id) >= 5 AND accuracy < 65
       ORDER BY accuracy ASC
       LIMIT 5
-    `).all();
+    `).all(activePaper);
 
     return {
+      activePaper,
       today: {
-        studySeconds: todayStudy.total_seconds,
-        sessions: todayStudy.session_count,
-        questionsSolved: todayQuestions.total,
-        questionsCorrect: todayQuestions.correct,
-        accuracy: todayQuestions.total > 0 ? Math.round(todayQuestions.correct / todayQuestions.total * 100) : 0,
-        subjects: todaySubjects,
+        studySeconds: todayStudy?.total_seconds || 0,
+        sessions: todayStudy?.session_count || 0,
+        questionsSolved: todayQuestions?.total || 0,
+        questionsCorrect: todayQuestions?.correct || 0,
+        accuracy: todayQuestions?.total > 0 ? Math.round(todayQuestions.correct / todayQuestions.total * 100) : 0,
+        subjects: todaySubjects || [],
       },
       week: {
-        studySeconds: weekStudy.total_seconds,
-        daysStudied: weekStudy.days_studied,
-        sessions: weekStudy.session_count,
-        avgDailySeconds: weekStudy.days_studied > 0 ? Math.round(weekStudy.total_seconds / 7) : 0,
-        questionsSolved: weekQuestions.total,
-        questionsCorrect: weekQuestions.correct,
-        accuracy: weekQuestions.total > 0 ? Math.round(weekQuestions.correct / weekQuestions.total * 100) : 0,
+        studySeconds: weekStudy?.total_seconds || 0,
+        daysStudied: weekStudy?.days_studied || 0,
+        sessions: weekStudy?.session_count || 0,
+        avgDailySeconds: weekStudy?.days_studied > 0 ? Math.round(weekStudy.total_seconds / 7) : 0,
+        questionsSolved: weekQuestions?.total || 0,
+        questionsCorrect: weekQuestions?.correct || 0,
+        accuracy: weekQuestions?.total > 0 ? Math.round(weekQuestions.correct / weekQuestions.total * 100) : 0,
       },
-      syllabus: syllabusStats,
-      subjectCompletion,
-      recentMocks,
-      revisionDueCount: revisionDue.count,
-      weakTopics,
+      syllabus: syllabusStats || { total_topics: 0, completed: 0, learning: 0, needs_revision: 0, not_started: 0 },
+      subjectCompletion: subjectCompletion || [],
+      recentMocks: recentMocks || [],
+      revisionDueCount: revisionDue?.count || 0,
+      weakTopics: weakTopics || [],
     };
   });
 
-  ipcMain.handle('analytics:getStudyAnalytics', (_e, range: any = {}) => {
+  ipcMain.handle('analytics:getStudyAnalytics', (_e, range: any = {}, paper?: string) => {
+    const activePaper = getActiveGatePaper(db, paper);
     const days = range.days || 30;
     
     // Daily study hours
     const dailyStudy = db.prepare(`
-      SELECT date(start_time) as date,
-        SUM(duration_seconds) / 3600.0 as hours,
+      SELECT date(ss.start_time) as date,
+        SUM(ss.duration_seconds) / 3600.0 as hours,
         COUNT(*) as sessions
-      FROM study_sessions
-      WHERE start_time >= datetime('now', '-${days} days') AND is_active = 0
-      GROUP BY date(start_time)
+      FROM study_sessions ss
+      LEFT JOIN subjects s ON ss.subject_id = s.id
+      WHERE ss.start_time >= datetime('now', '-${days} days') AND ss.is_active = 0
+        AND (s.id IS NULL OR s.gate_paper = ? OR s.gate_paper = 'SHARED' OR s.gate_paper = 'ALL')
+      GROUP BY date(ss.start_time)
       ORDER BY date ASC
-    `).all();
+    `).all(activePaper);
 
     // Study by subject
     const bySubject = db.prepare(`
@@ -150,52 +172,62 @@ export function registerAnalyticsHandlers(): void {
       FROM study_sessions ss
       JOIN subjects s ON ss.subject_id = s.id
       WHERE ss.start_time >= datetime('now', '-${days} days') AND ss.is_active = 0
+        AND (s.gate_paper = ? OR s.gate_paper = 'SHARED' OR s.gate_paper = 'ALL')
       GROUP BY s.id
       ORDER BY hours DESC
-    `).all();
+    `).all(activePaper);
 
     // Study by activity
     const byActivity = db.prepare(`
-      SELECT activity_type, SUM(duration_seconds) / 3600.0 as hours, COUNT(*) as sessions
-      FROM study_sessions
-      WHERE start_time >= datetime('now', '-${days} days') AND is_active = 0
-      GROUP BY activity_type
+      SELECT ss.activity_type, SUM(ss.duration_seconds) / 3600.0 as hours, COUNT(*) as sessions
+      FROM study_sessions ss
+      LEFT JOIN subjects s ON ss.subject_id = s.id
+      WHERE ss.start_time >= datetime('now', '-${days} days') AND ss.is_active = 0
+        AND (s.id IS NULL OR s.gate_paper = ? OR s.gate_paper = 'SHARED' OR s.gate_paper = 'ALL')
+      GROUP BY ss.activity_type
       ORDER BY hours DESC
-    `).all();
+    `).all(activePaper);
 
     // Average session length
     const avgSession = db.prepare(`
-      SELECT AVG(duration_seconds) / 60.0 as avg_minutes
-      FROM study_sessions
-      WHERE start_time >= datetime('now', '-${days} days') AND is_active = 0 AND duration_seconds > 60
-    `).get() as any;
+      SELECT AVG(ss.duration_seconds) / 60.0 as avg_minutes
+      FROM study_sessions ss
+      LEFT JOIN subjects s ON ss.subject_id = s.id
+      WHERE ss.start_time >= datetime('now', '-${days} days') AND ss.is_active = 0 AND ss.duration_seconds > 60
+        AND (s.id IS NULL OR s.gate_paper = ? OR s.gate_paper = 'SHARED' OR s.gate_paper = 'ALL')
+    `).get(activePaper) as any;
 
     // Total stats
     const totals = db.prepare(`
-      SELECT SUM(duration_seconds) / 3600.0 as total_hours,
+      SELECT SUM(ss.duration_seconds) / 3600.0 as total_hours,
         COUNT(*) as total_sessions,
-        COUNT(DISTINCT date(start_time)) as days_studied
-      FROM study_sessions
-      WHERE start_time >= datetime('now', '-${days} days') AND is_active = 0
-    `).get() as any;
+        COUNT(DISTINCT date(ss.start_time)) as days_studied
+      FROM study_sessions ss
+      LEFT JOIN subjects s ON ss.subject_id = s.id
+      WHERE ss.start_time >= datetime('now', '-${days} days') AND ss.is_active = 0
+        AND (s.id IS NULL OR s.gate_paper = ? OR s.gate_paper = 'SHARED' OR s.gate_paper = 'ALL')
+    `).get(activePaper) as any;
 
     return { dailyStudy, bySubject, byActivity, avgSessionMinutes: avgSession?.avg_minutes || 0, totals };
   });
 
-  ipcMain.handle('analytics:getQuestionAnalytics', (_e, range: any = {}) => {
+  ipcMain.handle('analytics:getQuestionAnalytics', (_e, range: any = {}, paper?: string) => {
+    const activePaper = getActiveGatePaper(db, paper);
     const days = range.days || 30;
     
     // Daily questions
     const dailyQuestions = db.prepare(`
-      SELECT date(created_at) as date,
+      SELECT date(q.created_at) as date,
         COUNT(*) as total,
-        COUNT(CASE WHEN is_correct = 1 THEN 1 END) as correct,
-        ROUND(CAST(COUNT(CASE WHEN is_correct = 1 THEN 1 END) AS REAL) / COUNT(*) * 100, 1) as accuracy
-      FROM questions
-      WHERE created_at >= datetime('now', '-${days} days')
-      GROUP BY date(created_at)
+        COUNT(CASE WHEN q.is_correct = 1 THEN 1 END) as correct,
+        ROUND(CAST(COUNT(CASE WHEN q.is_correct = 1 THEN 1 END) AS REAL) / COUNT(*) * 100, 1) as accuracy
+      FROM questions q
+      LEFT JOIN subjects s ON q.subject_id = s.id
+      WHERE q.created_at >= datetime('now', '-${days} days')
+        AND (s.id IS NULL OR s.gate_paper = ? OR s.gate_paper = 'SHARED' OR s.gate_paper = 'ALL')
+      GROUP BY date(q.created_at)
       ORDER BY date ASC
-    `).all();
+    `).all(activePaper);
 
     // By subject
     const bySubject = db.prepare(`
@@ -205,32 +237,38 @@ export function registerAnalyticsHandlers(): void {
       FROM questions q
       JOIN subjects s ON q.subject_id = s.id
       WHERE q.created_at >= datetime('now', '-${days} days')
+        AND (s.gate_paper = ? OR s.gate_paper = 'SHARED' OR s.gate_paper = 'ALL')
       GROUP BY s.id ORDER BY total DESC
-    `).all();
+    `).all(activePaper);
 
     // By difficulty
     const byDifficulty = db.prepare(`
-      SELECT difficulty, COUNT(*) as total,
-        COUNT(CASE WHEN is_correct = 1 THEN 1 END) as correct,
-        ROUND(CAST(COUNT(CASE WHEN is_correct = 1 THEN 1 END) AS REAL) / COUNT(*) * 100, 1) as accuracy
-      FROM questions
-      WHERE created_at >= datetime('now', '-${days} days')
-      GROUP BY difficulty
-    `).all();
+      SELECT q.difficulty, COUNT(*) as total,
+        COUNT(CASE WHEN q.is_correct = 1 THEN 1 END) as correct,
+        ROUND(CAST(COUNT(CASE WHEN q.is_correct = 1 THEN 1 END) AS REAL) / COUNT(*) * 100, 1) as accuracy
+      FROM questions q
+      LEFT JOIN subjects s ON q.subject_id = s.id
+      WHERE q.created_at >= datetime('now', '-${days} days')
+        AND (s.id IS NULL OR s.gate_paper = ? OR s.gate_paper = 'SHARED' OR s.gate_paper = 'ALL')
+      GROUP BY q.difficulty
+    `).all(activePaper);
 
     // Mistake categories
     const mistakeCategories = db.prepare(`
-      SELECT category, COUNT(*) as count
-      FROM mistakes
-      WHERE created_at >= datetime('now', '-${days} days')
-      GROUP BY category
+      SELECT m.category, COUNT(*) as count
+      FROM mistakes m
+      LEFT JOIN subjects s ON m.subject_id = s.id
+      WHERE m.created_at >= datetime('now', '-${days} days')
+        AND (s.id IS NULL OR s.gate_paper = ? OR s.gate_paper = 'SHARED' OR s.gate_paper = 'ALL')
+      GROUP BY m.category
       ORDER BY count DESC
-    `).all();
+    `).all(activePaper);
 
     return { dailyQuestions, bySubject, byDifficulty, mistakeCategories };
   });
 
-  ipcMain.handle('analytics:getWeakAreas', () => {
+  ipcMain.handle('analytics:getWeakAreas', (_e, paper?: string) => {
+    const activePaper = getActiveGatePaper(db, paper);
     return db.prepare(`
       SELECT t.id, t.name as topic_name, s.name as subject_name, s.color,
         t.status, t.confidence as topic_confidence,
@@ -244,7 +282,7 @@ export function registerAnalyticsHandlers(): void {
       FROM topics t
       JOIN subjects s ON t.subject_id = s.id
       LEFT JOIN questions q ON q.topic_id = t.id
-      WHERE s.is_archived = 0
+      WHERE s.is_archived = 0 AND (s.gate_paper = ? OR s.gate_paper = 'SHARED' OR s.gate_paper = 'ALL')
       GROUP BY t.id
       HAVING (
         (COUNT(q.id) >= 3 AND accuracy < 65)
@@ -256,13 +294,14 @@ export function registerAnalyticsHandlers(): void {
         CASE WHEN accuracy IS NULL THEN 100 ELSE accuracy END ASC,
         unresolved_mistakes DESC
       LIMIT 20
-    `).all();
+    `).all(activePaper);
   });
 
-  ipcMain.handle('analytics:getRecommendations', () => {
+  ipcMain.handle('analytics:getRecommendations', (_e, paper?: string) => {
+    const activePaper = getActiveGatePaper(db, paper);
     const recommendations: any[] = [];
     
-    // 1. Overdue revisions
+    // 1. Overdue revisions for active paper
     const overdueRevisions = db.prepare(`
       SELECT t.id as topic_id, t.name as topic_name, s.name as subject_name, s.color,
         r.next_revision_date, r.revision_number
@@ -272,9 +311,10 @@ export function registerAnalyticsHandlers(): void {
       LEFT JOIN topics t ON r.topic_id = t.id
       LEFT JOIN subjects s ON t.subject_id = s.id
       WHERE r.next_revision_date <= date('now')
+        AND s.is_archived = 0 AND (s.gate_paper = ? OR s.gate_paper = 'SHARED' OR s.gate_paper = 'ALL')
       ORDER BY r.next_revision_date ASC
       LIMIT 3
-    `).all() as any[];
+    `).all(activePaper) as any[];
     
     for (const rev of overdueRevisions) {
       recommendations.push({
@@ -287,7 +327,7 @@ export function registerAnalyticsHandlers(): void {
       });
     }
 
-    // 2. Weak topics needing practice
+    // 2. Weak topics needing practice for active paper
     const weakTopics = db.prepare(`
       SELECT t.id as topic_id, t.name as topic_name, s.name as subject_name, s.color,
         COUNT(q.id) as total_questions,
@@ -296,11 +336,12 @@ export function registerAnalyticsHandlers(): void {
       JOIN subjects s ON t.subject_id = s.id
       LEFT JOIN questions q ON q.topic_id = t.id
       WHERE s.is_archived = 0 AND t.status IN ('completed', 'learning')
+        AND (s.gate_paper = ? OR s.gate_paper = 'SHARED' OR s.gate_paper = 'ALL')
       GROUP BY t.id
       HAVING COUNT(q.id) >= 5 AND accuracy < 60
       ORDER BY accuracy ASC
       LIMIT 3
-    `).all() as any[];
+    `).all(activePaper) as any[];
     
     for (const topic of weakTopics) {
       recommendations.push({
@@ -313,18 +354,19 @@ export function registerAnalyticsHandlers(): void {
       });
     }
 
-    // 3. Topics learned but not practiced
+    // 3. Topics learned but not practiced for active paper
     const unpracticed = db.prepare(`
       SELECT t.id as topic_id, t.name as topic_name, s.name as subject_name, s.color
       FROM topics t
       JOIN subjects s ON t.subject_id = s.id
       LEFT JOIN questions q ON q.topic_id = t.id
       WHERE t.status IN ('completed', 'learning') AND s.is_archived = 0
+        AND (s.gate_paper = ? OR s.gate_paper = 'SHARED' OR s.gate_paper = 'ALL')
       GROUP BY t.id
       HAVING COUNT(q.id) < 5
       ORDER BY t.updated_at ASC
       LIMIT 3
-    `).all() as any[];
+    `).all(activePaper) as any[];
     
     for (const topic of unpracticed) {
       recommendations.push({
@@ -337,17 +379,17 @@ export function registerAnalyticsHandlers(): void {
       });
     }
 
-    // 4. Subjects with no recent study
+    // 4. Subjects with no recent study for active paper
     const neglectedSubjects = db.prepare(`
       SELECT s.id as subject_id, s.name as subject_name, s.color,
         MAX(ss.start_time) as last_studied
       FROM subjects s
       LEFT JOIN study_sessions ss ON ss.subject_id = s.id AND ss.is_active = 0
-      WHERE s.is_archived = 0
+      WHERE s.is_archived = 0 AND (s.gate_paper = ? OR s.gate_paper = 'SHARED' OR s.gate_paper = 'ALL')
       GROUP BY s.id
       HAVING last_studied IS NULL OR last_studied < datetime('now', '-14 days')
       LIMIT 2
-    `).all() as any[];
+    `).all(activePaper) as any[];
     
     for (const subj of neglectedSubjects) {
       recommendations.push({
@@ -362,16 +404,19 @@ export function registerAnalyticsHandlers(): void {
     return recommendations.slice(0, 8);
   });
 
-  ipcMain.handle('analytics:getHeatmap', (_e, year: number) => {
+  ipcMain.handle('analytics:getHeatmap', (_e, year: number, paper?: string) => {
+    const activePaper = getActiveGatePaper(db, paper);
     return db.prepare(`
-      SELECT date(start_time) as date,
-        SUM(duration_seconds) / 3600.0 as hours,
+      SELECT date(ss.start_time) as date,
+        SUM(ss.duration_seconds) / 3600.0 as hours,
         COUNT(*) as sessions
-      FROM study_sessions
-      WHERE strftime('%Y', start_time) = ? AND is_active = 0
-      GROUP BY date(start_time)
+      FROM study_sessions ss
+      LEFT JOIN subjects s ON ss.subject_id = s.id
+      WHERE strftime('%Y', ss.start_time) = ? AND ss.is_active = 0
+        AND (s.id IS NULL OR s.gate_paper = ? OR s.gate_paper = 'SHARED' OR s.gate_paper = 'ALL')
+      GROUP BY date(ss.start_time)
       ORDER BY date ASC
-    `).all(String(year));
+    `).all(String(year), activePaper);
   });
 
   ipcMain.handle('analytics:getSubjectStats', (_e, subjectId: number) => {
@@ -489,3 +534,4 @@ export function registerAnalyticsHandlers(): void {
     };
   });
 }
+

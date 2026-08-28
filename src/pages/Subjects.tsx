@@ -5,6 +5,7 @@ import { useToast } from '../contexts/ToastContext';
 
 export default function Subjects() {
   const [subjects, setSubjects] = useState<Subject[]>([]);
+  const [activePaper, setActivePaper] = useState<string>('CS');
   const [showAdd, setShowAdd] = useState(false);
   const [newName, setNewName] = useState('');
   const [newColor, setNewColor] = useState('#3B82F6');
@@ -14,13 +15,17 @@ export default function Subjects() {
   useEffect(() => { loadSubjects(); }, []);
 
   const loadSubjects = async () => {
-    const s = await window.electronAPI.subjects.getAll();
+    const [s, p] = await Promise.all([
+      window.electronAPI.subjects.getAll(),
+      window.electronAPI.settings.get('gate_paper'),
+    ]);
     setSubjects(s);
+    if (p) setActivePaper(p);
   };
 
   const handleAdd = async () => {
     if (!newName.trim()) return;
-    await window.electronAPI.subjects.create({ name: newName.trim(), color: newColor });
+    await window.electronAPI.subjects.create({ name: newName.trim(), color: newColor, gate_paper: activePaper });
     setNewName('');
     setShowAdd(false);
     loadSubjects();
@@ -35,10 +40,21 @@ export default function Subjects() {
   return (
     <div className="page">
       <div className="page-header">
-        <div className="flex items-center justify-between">
+        <div className="flex items-center justify-between flex-wrap gap-3">
           <div>
-            <h1 className="page-title">Subjects</h1>
-            <p className="page-subtitle">{subjects.length} subjects</p>
+            <div className="flex items-center gap-3">
+              <h1 className="page-title">Subjects</h1>
+              <span className="tag" style={{
+                background: activePaper === 'EC' ? 'rgba(16, 185, 129, 0.15)' : 'rgba(59, 130, 246, 0.15)',
+                color: activePaper === 'EC' ? '#10B981' : '#3B82F6',
+                border: activePaper === 'EC' ? '1px solid rgba(16, 185, 129, 0.3)' : '1px solid rgba(59, 130, 246, 0.3)',
+                fontWeight: 600,
+                fontSize: 'var(--text-xs)',
+              }}>
+                {activePaper === 'EC' ? 'GATE EC Track' : 'GATE CS Track'}
+              </span>
+            </div>
+            <p className="page-subtitle">{subjects.length} official syllabus sections & subjects</p>
           </div>
           <button className="btn btn-primary" onClick={() => setShowAdd(true)}>+ Add Subject</button>
         </div>
@@ -49,7 +65,14 @@ export default function Subjects() {
           <div key={s.id} className="subject-card" onClick={() => navigate(`/subjects/${s.id}`)}>
             <div className="subject-card-color" style={{ background: s.color }} />
             <div className="subject-card-info">
-              <div className="subject-card-name">{s.name}</div>
+              <div className="flex items-center gap-2">
+                <div className="subject-card-name">{s.name}</div>
+                {s.gate_paper === 'SHARED' && (
+                  <span className="tag" style={{ fontSize: '10px', padding: '1px 6px', background: 'var(--bg-tertiary)' }}>
+                    Common
+                  </span>
+                )}
+              </div>
               <div className="subject-card-meta">
                 <span>{s.topic_count || 0} topics</span>
                 <span>{formatHours(s.total_study_seconds || 0)} studied</span>

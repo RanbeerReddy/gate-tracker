@@ -1,11 +1,14 @@
 // ========== Database Entity Types ==========
 
+export type GatePaperCode = 'CS' | 'EC';
+
 export interface Subject {
   id: number;
   name: string;
   color: string;
   display_order: number;
   is_archived: number;
+  gate_paper?: GatePaperCode | 'SHARED' | 'ALL' | string;
   created_at: string;
   updated_at: string;
   // Computed
@@ -29,6 +32,7 @@ export interface Topic {
   // Computed
   subject_name?: string;
   subject_color?: string;
+  gate_paper?: GatePaperCode | string;
   subtopic_count?: number;
   total_study_seconds?: number;
   total_questions?: number;
@@ -63,6 +67,7 @@ export interface StudySession {
   questions_solved: number;
   focus_rating: number | null;
   is_active: number;
+  gate_paper?: GatePaperCode | string;
   created_at: string;
   // Computed
   subject_name?: string;
@@ -85,6 +90,7 @@ export interface PlannedSession {
   notes: string | null;
   is_completed: number;
   linked_session_id: number | null;
+  gate_paper?: GatePaperCode | string;
   created_at: string;
   // Computed
   subject_name?: string;
@@ -106,6 +112,7 @@ export interface Question {
   time_seconds: number | null;
   confidence: 'low' | 'medium' | 'high';
   is_pyq: number;
+  gate_paper?: GatePaperCode | string;
   notes: string | null;
   created_at: string;
   // Computed
@@ -191,6 +198,7 @@ export interface MockTest {
   unattempted: number;
   negative_marks: number;
   time_minutes: number | null;
+  gate_paper?: GatePaperCode | string;
   notes: string | null;
   created_at: string;
   sections?: MockTestSection[];
@@ -218,6 +226,7 @@ export interface Goal {
   start_date: string | null;
   end_date: string | null;
   is_active: number;
+  gate_paper?: GatePaperCode | string;
   notes: string | null;
   created_at: string;
 }
@@ -229,6 +238,7 @@ export interface Phase {
   end_date: string;
   notes: string | null;
   is_active: number;
+  gate_paper?: GatePaperCode | string;
   created_at: string;
   subjects?: PhaseSubject[];
 }
@@ -296,6 +306,7 @@ export interface UserProfile {
   bio: string | null;
   target_gate_year: number | null;
   target_score: number | null;
+  gate_paper?: GatePaperCode | string;
   created_at: string;
   updated_at: string;
   // Attached privacy & progress (if permitted)
@@ -326,6 +337,7 @@ export interface SharedProgress {
   questions_solved: number;
   overall_accuracy: number;
   syllabus_completion: number;
+  gate_paper?: GatePaperCode | string;
   subject_progress: { name: string; color: string; completion: number; hours: number }[];
   updated_at: string;
 }
@@ -343,6 +355,7 @@ export interface CommunityPost {
   user_id: string;
   content: string;
   subject_tag: string | null;
+  gate_paper?: GatePaperCode | string;
   shared_stats: {
     subject_name?: string;
     hours_studied?: number;
@@ -381,6 +394,7 @@ export interface Friendship {
 // ========== Dashboard Types ==========
 
 export interface DashboardData {
+  activePaper: GatePaperCode | string;
   today: {
     studySeconds: number;
     sessions: number;
@@ -424,7 +438,7 @@ export interface Recommendation {
 
 export interface ElectronAPI {
   subjects: {
-    getAll: () => Promise<Subject[]>;
+    getAll: (paper?: string) => Promise<Subject[]>;
     getById: (id: number) => Promise<Subject>;
     create: (data: Partial<Subject>) => Promise<Subject>;
     update: (id: number, data: Partial<Subject>) => Promise<Subject>;
@@ -460,7 +474,7 @@ export interface ElectronAPI {
     clearActiveState: () => Promise<void>;
   };
   planner: {
-    getByDate: (date: string) => Promise<PlannedSession[]>;
+    getByDate: (date: string, paper?: string) => Promise<PlannedSession[]>;
     create: (data: any) => Promise<PlannedSession>;
     update: (id: number, data: any) => Promise<PlannedSession>;
     delete: (id: number) => Promise<void>;
@@ -484,41 +498,41 @@ export interface ElectronAPI {
   };
   revisions: {
     create: (data: any) => Promise<Revision>;
-    getDue: () => Promise<Revision[]>;
+    getDue: (paper?: string) => Promise<Revision[]>;
     getByTopic: (topicId: number) => Promise<Revision[]>;
     getAll: (filters?: any) => Promise<Revision[]>;
     update: (id: number, data: any) => Promise<Revision>;
     delete: (id: number) => Promise<void>;
-    getSchedule: () => Promise<Revision[]>;
+    getSchedule: (paper?: string) => Promise<Revision[]>;
   };
   mocks: {
     create: (data: any) => Promise<MockTest>;
-    getAll: () => Promise<MockTest[]>;
+    getAll: (paper?: string) => Promise<MockTest[]>;
     getById: (id: number) => Promise<MockTest>;
     update: (id: number, data: any) => Promise<MockTest>;
     delete: (id: number) => Promise<void>;
   };
   goals: {
     create: (data: any) => Promise<Goal>;
-    getAll: () => Promise<Goal[]>;
-    getActive: () => Promise<Goal[]>;
+    getAll: (paper?: string) => Promise<Goal[]>;
+    getActive: (paper?: string) => Promise<Goal[]>;
     update: (id: number, data: any) => Promise<Goal>;
     delete: (id: number) => Promise<void>;
   };
   phases: {
     create: (data: any) => Promise<Phase>;
-    getAll: () => Promise<Phase[]>;
+    getAll: (paper?: string) => Promise<Phase[]>;
     getById: (id: number) => Promise<Phase>;
     update: (id: number, data: any) => Promise<Phase>;
     delete: (id: number) => Promise<void>;
   };
   analytics: {
-    getDashboard: () => Promise<DashboardData>;
-    getStudyAnalytics: (range?: any) => Promise<any>;
-    getQuestionAnalytics: (range?: any) => Promise<any>;
-    getWeakAreas: () => Promise<any[]>;
-    getRecommendations: () => Promise<Recommendation[]>;
-    getHeatmap: (year: number) => Promise<any[]>;
+    getDashboard: (paper?: string) => Promise<DashboardData>;
+    getStudyAnalytics: (range?: any, paper?: string) => Promise<any>;
+    getQuestionAnalytics: (range?: any, paper?: string) => Promise<any>;
+    getWeakAreas: (paper?: string) => Promise<any[]>;
+    getRecommendations: (paper?: string) => Promise<Recommendation[]>;
+    getHeatmap: (year: number, paper?: string) => Promise<any[]>;
     getSubjectStats: (subjectId: number) => Promise<any>;
     getTopicStats: (topicId: number) => Promise<any>;
   };
@@ -528,7 +542,7 @@ export interface ElectronAPI {
     create: (data: Partial<CalendarEvent>) => Promise<CalendarEvent>;
     update: (id: number, data: Partial<CalendarEvent>) => Promise<CalendarEvent>;
     delete: (id: number) => Promise<{ success: boolean }>;
-    getExamInfo: () => Promise<ExamInfo>;
+    getExamInfo: (paper?: string) => Promise<ExamInfo>;
   };
   settings: {
     get: (key: string) => Promise<string | null>;
@@ -544,7 +558,7 @@ export interface ElectronAPI {
     getDbInfo: () => Promise<any>;
   };
   search: {
-    global: (query: string) => Promise<any>;
+    global: (query: string, paper?: string) => Promise<any>;
   };
   setup: {
     isFirstRun: () => Promise<boolean>;

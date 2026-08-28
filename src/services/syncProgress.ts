@@ -73,8 +73,10 @@ export async function syncLocalProgressToCloud(userId: string, privacy: PrivacyS
         hours: Math.round((s.study_seconds || 0) / 3600),
       }));
 
+      const activePaper = dashboard.activePaper || (await window.electronAPI.settings.get('gate_paper')) || 'CS';
+
       // Prepare payload respecting granular privacy toggles
-      const payload: any = {
+      const basePayload: any = {
         user_id: userId,
         updated_at: new Date().toISOString(),
         total_study_hours: privacy.share_study_hours ? totalHours : 0,
@@ -86,7 +88,16 @@ export async function syncLocalProgressToCloud(userId: string, privacy: PrivacyS
         subject_progress: privacy.share_subject_progress ? subjectProgress : [],
       };
 
-      await sb.from('shared_progress').upsert(payload);
+      // Try upsert with gate_paper, fallback to basePayload if column not in remote DB
+      const { error: upsertErr } = await sb.from('shared_progress').upsert({ ...basePayload, gate_paper: activePaper });
+      if (upsertErr) {
+        await sb.from('shared_progress').upsert(basePayload);
+      }
+      
+      // Update profile track safely
+      try {
+        await sb.from('profiles').update({ gate_paper: activePaper }).eq('id', userId);
+      } catch (_) {}
     }
 
     // 2. Sync Shared Study Calendar (Sanitized Daily Hours Only)

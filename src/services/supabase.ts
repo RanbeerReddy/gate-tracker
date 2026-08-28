@@ -120,19 +120,34 @@ export async function fetchUserProfile(userId: string): Promise<UserProfile | nu
 export async function updateUserProfile(userId: string, data: Partial<UserProfile>): Promise<boolean> {
   try {
     const sb = getSupabase();
+    const updatePayload: any = {
+      updated_at: new Date().toISOString(),
+    };
+    if (data.display_name !== undefined) updatePayload.display_name = data.display_name;
+    if (data.avatar_url !== undefined) updatePayload.avatar_url = data.avatar_url;
+    if (data.bio !== undefined) updatePayload.bio = data.bio;
+    if (data.target_gate_year !== undefined) updatePayload.target_gate_year = data.target_gate_year;
+    if (data.target_score !== undefined) updatePayload.target_score = data.target_score;
+
+    // Try update with gate_paper if provided
+    let errToThrow: any = null;
+    if (data.gate_paper !== undefined) {
+      const { error: errorWithPaper } = await sb
+        .from('profiles')
+        .update({ ...updatePayload, gate_paper: data.gate_paper })
+        .eq('id', userId);
+      
+      if (!errorWithPaper) return true;
+      errToThrow = errorWithPaper;
+    }
+
+    // Fallback update without gate_paper if column is not on remote schema
     const { error } = await sb
       .from('profiles')
-      .update({
-        display_name: data.display_name,
-        avatar_url: data.avatar_url,
-        bio: data.bio,
-        target_gate_year: data.target_gate_year,
-        target_score: data.target_score,
-        updated_at: new Date().toISOString(),
-      })
+      .update(updatePayload)
       .eq('id', userId);
 
-    if (error) throw error;
+    if (error) throw errToThrow || error;
     return true;
   } catch (err) {
     console.error('Error updating profile:', err);
@@ -163,14 +178,19 @@ export async function updatePrivacySettings(userId: string, settings: Partial<Pr
 // COMMUNITY POSTS & FEED
 // ==========================================
 
-export async function fetchCommunityPosts(page: number = 0, limit: number = 20, filter: 'latest' | 'popular' = 'latest'): Promise<CommunityPost[]> {
+export async function fetchCommunityPosts(
+  page: number = 0,
+  limit: number = 20,
+  filter: 'latest' | 'popular' = 'latest',
+  paperFilter: 'all' | 'CS' | 'EC' = 'all'
+): Promise<CommunityPost[]> {
   try {
     const sb = getSupabase();
     let query = sb
       .from('posts')
       .select(`
         *,
-        author:profiles(id, username, display_name, avatar_url, target_gate_year)
+        author:profiles!posts_user_id_fkey(id, username, display_name, avatar_url, target_gate_year)
       `)
       .range(page * limit, (page + 1) * limit - 1);
 
@@ -187,6 +207,7 @@ export async function fetchCommunityPosts(page: number = 0, limit: number = 20, 
     const { data: sessionData } = await sb.auth.getSession();
     const currentUserId = sessionData?.session?.user?.id;
 
+    let likedPostIds = new Set<string>();
     if (currentUserId && data && data.length > 0) {
       const postIds = data.map((p: any) => p.id);
       const { data: userLikes } = await sb
@@ -195,43 +216,68 @@ export async function fetchCommunityPosts(page: number = 0, limit: number = 20, 
         .eq('user_id', currentUserId)
         .in('post_id', postIds);
 
-      const likedPostIds = new Set(userLikes?.map((l: any) => l.post_id) || []);
-      return data.map((post: any) => ({
-        ...post,
-        has_liked: likedPostIds.has(post.id),
-      }));
+      likedPostIds = new Set(userLikes?.map((l: any) => l.post_id) || []);
     }
 
-    return (data || []) as CommunityPost[];
+    let normalizedPosts: CommunityPost[] = (data || []).map((post: any) => {
+      const postPaper = post.gate_paper || post.shared_stats?.gate_paper || 'CS';
+      return {
+        ...post,
+        gate_paper: postPaper,
+        has_liked: likedPostIds.has(post.id),
+      };
+    });
+
+    if (paperFilter && paperFilter !== 'all') {
+      normalizedPosts = normalizedPosts.filter(p => p.gate_paper === paperFilter);
+    }
+
+    return normalizedPosts;
   } catch (err) {
     console.warn('Unable to load community posts (offline or unconfigured):', err);
     return [];
   }
 }
 
-export async function createCommunityPost(content: string, subjectTag?: string | null, sharedStats?: any): Promise<CommunityPost | null> {
+export async function createCommunityPost(
+  content: string,
+  subjectTag?: string | null,
+  sharedStats?: any,
+  gatePaper: string = 'CS'
+): Promise<CommunityPost | null> {
   try {
     const sb = getSupabase();
     const { data: sessionData } = await sb.auth.getSession();
     const userId = sessionData?.session?.user?.id;
     if (!userId) throw new Error('Not authenticated');
 
+    // Store gate_paper in shared_stats to remain backwards-compatible with all Supabase schemas
+    const statsPayload = {
+      ...(sharedStats || {}),
+      gate_paper: gatePaper,
+    };
+
+    const insertPayload: any = {
+      user_id: userId,
+      content: content.trim(),
+      subject_tag: subjectTag || null,
+      shared_stats: statsPayload,
+    };
+
     const { data, error } = await sb
       .from('posts')
-      .insert({
-        user_id: userId,
-        content: content.trim(),
-        subject_tag: subjectTag || null,
-        shared_stats: sharedStats || null,
-      })
+      .insert(insertPayload)
       .select(`
         *,
-        author:profiles(id, username, display_name, avatar_url, target_gate_year)
+        author:profiles!posts_user_id_fkey(id, username, display_name, avatar_url, target_gate_year)
       `)
       .single();
 
     if (error) throw error;
-    return data as CommunityPost;
+    return {
+      ...data,
+      gate_paper: (data as any).gate_paper || statsPayload.gate_paper || 'CS',
+    } as CommunityPost;
   } catch (err) {
     console.error('Error creating post:', err);
     return null;
@@ -391,27 +437,32 @@ export async function blockUser(blockedId: string): Promise<boolean> {
 // USER SEARCH & PEOPLE
 // ==========================================
 
-export async function searchUsers(query: string): Promise<UserProfile[]> {
+export async function searchUsers(query: string = ''): Promise<UserProfile[]> {
   try {
-    if (!query.trim()) return [];
     const sb = getSupabase();
-
-    const { data, error } = await sb
+    let q = sb
       .from('profiles')
       .select(`
         *,
         privacy:privacy_settings(*),
         progress:shared_progress(*)
       `)
-      .or(`username.ilike.%${query.trim()}%,display_name.ilike.%${query.trim()}%`)
-      .limit(20);
+      .order('updated_at', { ascending: false })
+      .limit(25);
 
+    const trimmed = query.trim();
+    if (trimmed) {
+      q = q.or(`username.ilike.%${trimmed}%,display_name.ilike.%${trimmed}%`);
+    }
+
+    const { data, error } = await q;
     if (error) throw error;
 
     return (data || []).map((p: any) => {
       const isPublic = p.privacy?.share_profile ?? false;
       return {
         ...p,
+        gate_paper: p.gate_paper || 'CS',
         privacy: p.privacy,
         progress: isPublic ? p.progress : undefined,
       };

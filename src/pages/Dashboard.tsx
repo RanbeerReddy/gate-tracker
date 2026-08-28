@@ -42,15 +42,34 @@ export default function Dashboard() {
   const dailyTarget = parseFloat(settings.daily_study_target_hours || '7') * 3600;
   const dailyProgress = dailyTarget > 0 ? Math.min(100, (data.today.studySeconds / dailyTarget) * 100) : 0;
 
+  const activePaper = data.activePaper || settings.gate_paper || 'CS';
+  const isEC = activePaper === 'EC';
+
   return (
     <div className="page">
       <div className="page-header">
         <div className="flex items-center justify-between flex-wrap gap-3">
           <div>
-            <h1 className="page-title">Dashboard</h1>
+            <div className="flex items-center gap-3">
+              <h1 className="page-title">Dashboard</h1>
+              <span
+                className="tag"
+                style={{
+                  background: isEC ? 'rgba(16, 185, 129, 0.15)' : 'rgba(59, 130, 246, 0.15)',
+                  color: isEC ? '#10B981' : '#3B82F6',
+                  border: isEC ? '1px solid rgba(16, 185, 129, 0.3)' : '1px solid rgba(59, 130, 246, 0.3)',
+                  fontWeight: 600,
+                  fontSize: 'var(--text-xs)',
+                  padding: '4px 10px',
+                  borderRadius: 'var(--radius-full)',
+                }}
+              >
+                {isEC ? 'GATE EC — Electronics & Communication' : 'GATE CS — Computer Science & IT'}
+              </span>
+            </div>
             <p className="page-subtitle">
               {new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })}
-              {settings.target_gate_year && ` • GATE ${settings.target_gate_year}`}
+              {settings.target_gate_year && ` • Target: GATE ${activePaper} ${settings.target_gate_year}`}
             </p>
           </div>
 

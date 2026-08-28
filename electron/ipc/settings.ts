@@ -103,17 +103,22 @@ export function registerSettingsHandlers(): void {
 
   ipcMain.handle('setup:complete', (_e, data: any) => {
     const upsert = db.prepare("INSERT OR REPLACE INTO settings (key, value, updated_at) VALUES (?, ?, datetime('now'))");
+    const paper = data.gate_paper || 'CS';
+    const year = data.target_gate_year || '2027';
+    const defaultExamName = paper === 'EC' ? `GATE EC ${year}` : `GATE CS ${year}`;
     
     db.transaction(() => {
-      if (data.target_gate_year) upsert.run('target_gate_year', data.target_gate_year);
-      if (data.target_score) upsert.run('target_score', data.target_score);
-      if (data.target_rank) upsert.run('target_rank', data.target_rank);
-      if (data.daily_study_target_hours) upsert.run('daily_study_target_hours', data.daily_study_target_hours);
+      upsert.run('gate_paper', paper);
+      if (data.target_gate_year) upsert.run('target_gate_year', String(data.target_gate_year));
+      if (data.target_score) upsert.run('target_score', String(data.target_score));
+      if (data.target_rank) upsert.run('target_rank', String(data.target_rank));
+      if (data.daily_study_target_hours) upsert.run('daily_study_target_hours', String(data.daily_study_target_hours));
       if (data.theme) upsert.run('theme', data.theme);
+      upsert.run('gate_exam_name', data.gate_exam_name || defaultExamName);
       upsert.run('first_run_complete', 'true');
     })();
     
-    log('First-run setup completed.');
+    log(`First-run setup completed for paper: ${paper}`);
   });
 
   // Privacy Settings (local SQLite cache, scoped per user)

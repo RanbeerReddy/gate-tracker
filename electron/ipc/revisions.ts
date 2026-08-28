@@ -1,6 +1,7 @@
 import { ipcMain } from 'electron';
 import { getDatabase } from '../database/connection';
 import { formatLocalDate } from '../utils/dates';
+import { getActiveGatePaper } from './subjects';
 
 export function registerRevisionHandlers(): void {
   const db = getDatabase();
@@ -51,7 +52,8 @@ export function registerRevisionHandlers(): void {
     return db.prepare('SELECT * FROM revisions WHERE id = ?').get(result.lastInsertRowid);
   });
 
-  ipcMain.handle('revisions:getDue', () => {
+  ipcMain.handle('revisions:getDue', (_e, paper?: string) => {
+    const activePaper = getActiveGatePaper(db, paper);
     return db.prepare(`
       SELECT r.*, t.name as topic_name, s.name as subject_name, s.color as subject_color,
         t.status as topic_status
@@ -62,8 +64,9 @@ export function registerRevisionHandlers(): void {
         AND r.id IN (
           SELECT MAX(id) FROM revisions GROUP BY topic_id
         )
+        AND (s.id IS NULL OR s.gate_paper = ? OR s.gate_paper = 'SHARED' OR s.gate_paper = 'ALL')
       ORDER BY r.next_revision_date ASC
-    `).all();
+    `).all(activePaper);
   });
 
   ipcMain.handle('revisions:getByTopic', (_e, topicId: number) => {
@@ -73,8 +76,14 @@ export function registerRevisionHandlers(): void {
   });
 
   ipcMain.handle('revisions:getAll', (_e, filters: any = {}) => {
+    const activePaper = getActiveGatePaper(db, filters.gate_paper || filters.paper);
     let where = 'WHERE 1=1';
     const params: any[] = [];
+    
+    if (filters.paper !== 'ALL' && filters.gate_paper !== 'ALL') {
+      where += ` AND (s.id IS NULL OR s.gate_paper = ? OR s.gate_paper = 'SHARED' OR s.gate_paper = 'ALL')`;
+      params.push(activePaper);
+    }
     
     if (filters.topic_id) { where += ' AND r.topic_id = ?'; params.push(filters.topic_id); }
     if (filters.date_from) { where += ' AND r.revision_date >= ?'; params.push(filters.date_from); }
@@ -108,7 +117,8 @@ export function registerRevisionHandlers(): void {
     db.prepare('DELETE FROM revisions WHERE id = ?').run(id);
   });
 
-  ipcMain.handle('revisions:getSchedule', () => {
+  ipcMain.handle('revisions:getSchedule', (_e, paper?: string) => {
+    const activePaper = getActiveGatePaper(db, paper);
     // Get the latest revision for each topic and show upcoming schedule
     return db.prepare(`
       SELECT r.*, t.name as topic_name, s.name as subject_name, s.color as subject_color,
@@ -119,18 +129,19 @@ export function registerRevisionHandlers(): void {
       ) latest ON r.id = latest.max_id
       LEFT JOIN topics t ON r.topic_id = t.id
       LEFT JOIN subjects s ON t.subject_id = s.id
-      WHERE r.next_revision_date IS NOT NULL
+      WHERE s.is_archived = 0 AND (s.gate_paper = ? OR s.gate_paper = 'SHARED' OR s.gate_paper = 'ALL')
       ORDER BY r.next_revision_date ASC
-    `).all();
+      LIMIT 50
+    `).all(activePaper);
   });
 }
 
 function getRevisionIntervals(): number[] {
+  const db = getDatabase();
   try {
-    const db = getDatabase();
     const setting = db.prepare("SELECT value FROM settings WHERE key = 'revision_intervals'").get() as any;
     if (setting?.value) {
-      return setting.value.split(',').map((s: string) => parseInt(s.trim()));
+      return setting.value.split(',').map((s: string) => parseInt(s.trim(), 10)).filter((n: number) => !isNaN(n));
     }
   } catch {}
   return [1, 3, 7, 14, 30]; // Default intervals

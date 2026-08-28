@@ -14,6 +14,7 @@ CREATE TABLE IF NOT EXISTS public.profiles (
     bio TEXT,
     target_gate_year INTEGER,
     target_score NUMERIC(5,2),
+    gate_paper TEXT DEFAULT 'CS',
     created_at TIMESTAMPTZ DEFAULT NOW(),
     updated_at TIMESTAMPTZ DEFAULT NOW(),
     CONSTRAINT username_length CHECK (char_length(username) >= 3 AND char_length(username) <= 30)
@@ -42,6 +43,7 @@ CREATE TABLE IF NOT EXISTS public.shared_progress (
     questions_solved INTEGER DEFAULT 0,
     overall_accuracy NUMERIC(5,2) DEFAULT 0,
     syllabus_completion NUMERIC(5,2) DEFAULT 0,
+    gate_paper TEXT DEFAULT 'CS',
     subject_progress JSONB DEFAULT '[]'::jsonb,
     updated_at TIMESTAMPTZ DEFAULT NOW()
 );
@@ -63,6 +65,7 @@ CREATE TABLE IF NOT EXISTS public.posts (
     user_id UUID NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
     content TEXT NOT NULL,
     subject_tag TEXT,
+    gate_paper TEXT DEFAULT 'CS',
     shared_stats JSONB,
     likes_count INTEGER DEFAULT 0,
     comments_count INTEGER DEFAULT 0,

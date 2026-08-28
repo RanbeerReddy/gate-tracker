@@ -1,27 +1,43 @@
 import { ipcMain } from 'electron';
 import { getDatabase } from '../database/connection';
+import { getActiveGatePaper } from './subjects';
 
 export function registerQuestionHandlers(): void {
   const db = getDatabase();
 
   ipcMain.handle('questions:create', (_e, data: any) => {
+    let paper = data.gate_paper;
+    if (!paper && data.subject_id) {
+      const subj = db.prepare('SELECT gate_paper FROM subjects WHERE id = ?').get(data.subject_id) as any;
+      if (subj?.gate_paper && subj.gate_paper !== 'SHARED' && subj.gate_paper !== 'ALL') {
+        paper = subj.gate_paper;
+      }
+    }
+    if (!paper) paper = getActiveGatePaper(db);
+
     const result = db.prepare(`
-      INSERT INTO questions (source, year, subject_id, topic_id, subtopic_id, difficulty, question_type, is_correct, time_seconds, confidence, is_pyq, notes)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO questions (source, year, subject_id, topic_id, subtopic_id, difficulty, question_type, is_correct, time_seconds, confidence, is_pyq, gate_paper, notes)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       data.source || null, data.year || null, data.subject_id || null,
       data.topic_id || null, data.subtopic_id || null,
       data.difficulty || 'medium', data.question_type || 'mcq',
       data.is_correct !== undefined ? (data.is_correct ? 1 : 0) : null,
       data.time_seconds || null, data.confidence || 'medium',
-      data.is_pyq ? 1 : 0, data.notes || null
+      data.is_pyq ? 1 : 0, paper, data.notes || null
     );
     return db.prepare('SELECT * FROM questions WHERE id = ?').get(result.lastInsertRowid);
   });
 
   ipcMain.handle('questions:getAll', (_e, filters: any = {}) => {
+    const activePaper = getActiveGatePaper(db, filters.gate_paper || filters.paper);
     let where = 'WHERE 1=1';
     const params: any[] = [];
+
+    if (filters.paper !== 'ALL' && filters.gate_paper !== 'ALL') {
+      where += ` AND (q.gate_paper = ? OR s.gate_paper = ? OR s.gate_paper = 'SHARED' OR s.gate_paper = 'ALL')`;
+      params.push(activePaper, activePaper);
+    }
     
     if (filters.subject_id) { where += ' AND q.subject_id = ?'; params.push(filters.subject_id); }
     if (filters.topic_id) { where += ' AND q.topic_id = ?'; params.push(filters.topic_id); }
@@ -65,7 +81,7 @@ export function registerQuestionHandlers(): void {
     const sets: string[] = [];
     const values: any[] = [];
     const fields = ['source', 'year', 'subject_id', 'topic_id', 'subtopic_id', 'difficulty',
-      'question_type', 'is_correct', 'time_seconds', 'confidence', 'is_pyq', 'notes'];
+      'question_type', 'is_correct', 'time_seconds', 'confidence', 'is_pyq', 'gate_paper', 'notes'];
     
     for (const field of fields) {
       if (data[field] !== undefined) {
@@ -88,9 +104,10 @@ export function registerQuestionHandlers(): void {
   });
 
   ipcMain.handle('questions:bulkCreate', (_e, dataArr: any[]) => {
+    const activePaper = getActiveGatePaper(db);
     const insert = db.prepare(`
-      INSERT INTO questions (source, year, subject_id, topic_id, subtopic_id, difficulty, question_type, is_correct, time_seconds, confidence, is_pyq, notes)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO questions (source, year, subject_id, topic_id, subtopic_id, difficulty, question_type, is_correct, time_seconds, confidence, is_pyq, gate_paper, notes)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
     
     const insertAll = db.transaction((items: any[]) => {
@@ -101,7 +118,7 @@ export function registerQuestionHandlers(): void {
           data.difficulty || 'medium', data.question_type || 'mcq',
           data.is_correct !== undefined ? (data.is_correct ? 1 : 0) : null,
           data.time_seconds || null, data.confidence || 'medium',
-          data.is_pyq ? 1 : 0, data.notes || null
+          data.is_pyq ? 1 : 0, data.gate_paper || activePaper, data.notes || null
         );
       }
     });
@@ -110,3 +127,4 @@ export function registerQuestionHandlers(): void {
     return { inserted: dataArr.length };
   });
 }
+

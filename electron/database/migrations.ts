@@ -311,7 +311,39 @@ const MIGRATIONS = [
       INSERT OR IGNORE INTO user_privacy_cache (user_id) VALUES ('local');
     `,
   },
+  {
+    version: 5,
+    name: 'multi_paper_gate_support',
+    up: `
+      -- Paper-aware column additions
+      -- (Executed with fallback-safe column additions in migration runner)
+      UPDATE subjects SET gate_paper = 'SHARED' WHERE name = 'General Aptitude';
+      UPDATE subjects SET gate_paper = 'CS' WHERE name != 'General Aptitude' AND (gate_paper IS NULL OR gate_paper = '');
+      
+      INSERT OR IGNORE INTO settings (key, value) VALUES ('gate_paper', 'CS');
+      
+      CREATE INDEX IF NOT EXISTS idx_subjects_paper ON subjects(gate_paper);
+      CREATE INDEX IF NOT EXISTS idx_questions_paper ON questions(gate_paper);
+      CREATE INDEX IF NOT EXISTS idx_mocks_paper ON mock_tests(gate_paper);
+      CREATE INDEX IF NOT EXISTS idx_sessions_paper ON study_sessions(gate_paper);
+      CREATE INDEX IF NOT EXISTS idx_goals_paper ON goals(gate_paper);
+      CREATE INDEX IF NOT EXISTS idx_planned_paper ON planned_sessions(gate_paper);
+    `,
+  },
 ];
+
+function ensureColumnExists(db: any, tableName: string, columnName: string, columnDef: string): void {
+  try {
+    const columns = db.prepare(`PRAGMA table_info(${tableName})`).all() as any[];
+    const exists = columns.some((col: any) => col.name === columnName);
+    if (!exists) {
+      db.exec(`ALTER TABLE ${tableName} ADD COLUMN ${columnName} ${columnDef};`);
+      log(`Added column ${columnName} to table ${tableName}`);
+    }
+  } catch (err) {
+    log(`Warning checking/adding column ${columnName} to ${tableName}:`, err);
+  }
+}
 
 export function runMigrations(): void {
   const db = getDatabase();
@@ -333,6 +365,8 @@ export function runMigrations(): void {
   const pendingMigrations = MIGRATIONS.filter(m => m.version > current);
   
   if (pendingMigrations.length === 0) {
+    // Ensure all tables and seed data are up to date
+    ensureECDataSeeded(db);
     log('No pending migrations.');
     return;
   }
@@ -341,6 +375,17 @@ export function runMigrations(): void {
     log(`Applying migration ${migration.version}: ${migration.name}`);
     
     const runMigration = db.transaction(() => {
+      // Pre-step for migration 5: ensure columns exist before executing DML/indexes
+      if (migration.version === 5) {
+        ensureColumnExists(db, 'subjects', 'gate_paper', "TEXT NOT NULL DEFAULT 'CS'");
+        ensureColumnExists(db, 'questions', 'gate_paper', "TEXT NOT NULL DEFAULT 'CS'");
+        ensureColumnExists(db, 'mock_tests', 'gate_paper', "TEXT NOT NULL DEFAULT 'CS'");
+        ensureColumnExists(db, 'study_sessions', 'gate_paper', "TEXT NOT NULL DEFAULT 'CS'");
+        ensureColumnExists(db, 'goals', 'gate_paper', "TEXT NOT NULL DEFAULT 'CS'");
+        ensureColumnExists(db, 'phases', 'gate_paper', "TEXT NOT NULL DEFAULT 'CS'");
+        ensureColumnExists(db, 'planned_sessions', 'gate_paper', "TEXT NOT NULL DEFAULT 'CS'");
+      }
+
       // Split and execute each statement separately
       const statements = migration.up.split(';').filter(s => s.trim());
       for (const stmt of statements) {
@@ -363,4 +408,68 @@ export function runMigrations(): void {
       throw err;
     }
   }
+
+  // Ensure EC Syllabus is seeded into subjects/topics/subtopics
+  ensureECDataSeeded(db);
 }
+
+import { GATE_PAPERS } from '../../src/config/gatePapers';
+
+export function ensureECDataSeeded(db: any): void {
+  try {
+    // Check if EC subjects exist
+    const ecSubjectsCount = db.prepare("SELECT COUNT(*) as count FROM subjects WHERE gate_paper = 'EC'").get() as any;
+    if (ecSubjectsCount && ecSubjectsCount.count > 0) {
+      return; // Already seeded
+    }
+
+    log('Seeding official GATE EC subjects and topics...');
+    const ecConfig = GATE_PAPERS.EC;
+    if (!ecConfig || !ecConfig.subjects) return;
+
+    const insertSubject = db.prepare(
+      'INSERT INTO subjects (name, color, display_order, gate_paper) VALUES (?, ?, ?, ?)'
+    );
+    const insertTopic = db.prepare(
+      'INSERT INTO topics (subject_id, name, display_order) VALUES (?, ?, ?)'
+    );
+    const insertSubtopic = db.prepare(
+      'INSERT INTO subtopics (topic_id, name, display_order) VALUES (?, ?, ?)'
+    );
+
+    const seedEC = db.transaction(() => {
+      // Find max display_order
+      const maxOrderRow = db.prepare('SELECT MAX(display_order) as max_order FROM subjects').get() as any;
+      let order = (maxOrderRow?.max_order || 0) + 1;
+
+      for (const subject of ecConfig.subjects) {
+        // Skip General Aptitude if already exists as SHARED
+        if (subject.name === 'General Aptitude') {
+          const ga = db.prepare("SELECT id FROM subjects WHERE name = 'General Aptitude'").get() as any;
+          if (ga) {
+            db.prepare("UPDATE subjects SET gate_paper = 'SHARED' WHERE id = ?").run(ga.id);
+            continue;
+          }
+        }
+
+        const subResult = insertSubject.run(subject.name, subject.color, order++, 'EC');
+        const subjectId = subResult.lastInsertRowid as number;
+
+        subject.topics.forEach((topic, tIdx) => {
+          const topResult = insertTopic.run(subjectId, topic.name, tIdx);
+          const topicId = topResult.lastInsertRowid as number;
+
+          topic.subtopics.forEach((subtopic, stIdx) => {
+            insertSubtopic.run(topicId, subtopic, stIdx);
+          });
+        });
+      }
+    });
+
+    seedEC();
+    log('GATE EC syllabus seeded successfully.');
+  } catch (err) {
+    log('Warning while checking/seeding EC syllabus:', err);
+  }
+}
+
