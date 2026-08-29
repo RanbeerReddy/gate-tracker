@@ -459,12 +459,14 @@ export async function searchUsers(query: string = ''): Promise<UserProfile[]> {
     if (error) throw error;
 
     return (data || []).map((p: any) => {
-      const isPublic = p.privacy?.share_profile ?? false;
+      const privacy = Array.isArray(p.privacy) ? p.privacy[0] : p.privacy;
+      const progress = Array.isArray(p.progress) ? p.progress[0] : p.progress;
+      const isPublic = privacy?.share_profile ?? false;
       return {
         ...p,
         gate_paper: p.gate_paper || 'CS',
-        privacy: p.privacy,
-        progress: isPublic ? p.progress : undefined,
+        privacy: privacy || undefined,
+        progress: isPublic ? progress : undefined,
       };
     });
   } catch (err) {
@@ -484,18 +486,37 @@ export async function fetchFriends(userId: string): Promise<Friendship[]> {
       .from('friendships')
       .select(`
         *,
-        requester:profiles!friendships_requester_id_fkey(id, username, display_name, avatar_url, target_gate_year),
-        addressee:profiles!friendships_addressee_id_fkey(id, username, display_name, avatar_url, target_gate_year)
+        requester:profiles!friendships_requester_id_fkey(
+          id, username, display_name, avatar_url, target_gate_year, gate_paper, bio,
+          privacy:privacy_settings(*),
+          progress:shared_progress(*)
+        ),
+        addressee:profiles!friendships_addressee_id_fkey(
+          id, username, display_name, avatar_url, target_gate_year, gate_paper, bio,
+          privacy:privacy_settings(*),
+          progress:shared_progress(*)
+        )
       `)
       .or(`requester_id.eq.${userId},addressee_id.eq.${userId}`)
       .eq('status', 'accepted');
 
     if (error) throw error;
 
-    return (data || []).map((f: any) => ({
-      ...f,
-      friend_profile: f.requester_id === userId ? f.addressee : f.requester,
-    }));
+    return (data || []).map((f: any) => {
+      const rawFriend = f.requester_id === userId ? f.addressee : f.requester;
+      if (!rawFriend) return f;
+      const privacy = Array.isArray(rawFriend.privacy) ? rawFriend.privacy[0] : rawFriend.privacy;
+      const progress = Array.isArray(rawFriend.progress) ? rawFriend.progress[0] : rawFriend.progress;
+      return {
+        ...f,
+        friend_profile: {
+          ...rawFriend,
+          gate_paper: rawFriend.gate_paper || 'CS',
+          privacy: privacy || undefined,
+          progress: (privacy?.share_profile ?? true) ? progress : undefined,
+        },
+      };
+    });
   } catch (err) {
     console.error('Error fetching friends:', err);
     return [];
@@ -509,21 +530,41 @@ export async function fetchPendingFriendRequests(userId: string): Promise<{ inco
       .from('friendships')
       .select(`
         *,
-        requester:profiles!friendships_requester_id_fkey(id, username, display_name, avatar_url, target_gate_year),
-        addressee:profiles!friendships_addressee_id_fkey(id, username, display_name, avatar_url, target_gate_year)
+        requester:profiles!friendships_requester_id_fkey(
+          id, username, display_name, avatar_url, target_gate_year, gate_paper, bio,
+          privacy:privacy_settings(*),
+          progress:shared_progress(*)
+        ),
+        addressee:profiles!friendships_addressee_id_fkey(
+          id, username, display_name, avatar_url, target_gate_year, gate_paper, bio,
+          privacy:privacy_settings(*),
+          progress:shared_progress(*)
+        )
       `)
       .or(`requester_id.eq.${userId},addressee_id.eq.${userId}`)
       .eq('status', 'pending');
 
     if (error) throw error;
 
+    const normalizeFriend = (raw: any) => {
+      if (!raw) return raw;
+      const privacy = Array.isArray(raw.privacy) ? raw.privacy[0] : raw.privacy;
+      const progress = Array.isArray(raw.progress) ? raw.progress[0] : raw.progress;
+      return {
+        ...raw,
+        gate_paper: raw.gate_paper || 'CS',
+        privacy: privacy || undefined,
+        progress: (privacy?.share_profile ?? true) ? progress : undefined,
+      };
+    };
+
     const incoming = (data || [])
       .filter((f: any) => f.addressee_id === userId)
-      .map((f: any) => ({ ...f, friend_profile: f.requester }));
+      .map((f: any) => ({ ...f, friend_profile: normalizeFriend(f.requester) }));
 
     const outgoing = (data || [])
       .filter((f: any) => f.requester_id === userId)
-      .map((f: any) => ({ ...f, friend_profile: f.addressee }));
+      .map((f: any) => ({ ...f, friend_profile: normalizeFriend(f.addressee) }));
 
     return { incoming, outgoing };
   } catch (err) {
