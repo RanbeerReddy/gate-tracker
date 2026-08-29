@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { fetchSharedCalendar } from '../../services/supabase';
 import { SharedCalendarDay, UserProfile } from '../../types';
-import { formatLocalDate } from '../../utils/dateUtils';
+import { formatLocalDate, parseLocalDate } from '../../utils/dateUtils';
 
 interface Props {
   user: UserProfile;
@@ -22,10 +22,15 @@ export default function SharedCalendarModal({ user, onClose }: Props) {
   }, [user.id]);
 
   const getCalendarDays = () => {
-    const days: SharedCalendarDay[] = [];
+    const days: (SharedCalendarDay | null)[] = [];
     const start = new Date(year, 0, 1);
     const end = new Date(year, 11, 31);
     const map = new Map(calendarDays.map(d => [d.date, d]));
+
+    const firstDayOfWeek = start.getDay();
+    for (let i = 0; i < firstDayOfWeek; i++) {
+      days.push(null);
+    }
 
     for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
       const dateStr = formatLocalDate(d);
@@ -53,10 +58,11 @@ export default function SharedCalendarModal({ user, onClose }: Props) {
   };
 
   const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  const firstDayOfWeek = new Date(year, 0, 1).getDay();
 
   return (
     <div className="modal-overlay" onClick={onClose}>
-      <div className="modal modal-lg" onClick={e => e.stopPropagation()} style={{ maxWidth: '820px' }}>
+      <div className="modal modal-lg" onClick={e => e.stopPropagation()} style={{ maxWidth: '840px' }}>
         <div className="modal-header">
           <div>
             <h2 className="modal-title">Study Calendar • @{user.username}</h2>
@@ -73,29 +79,52 @@ export default function SharedCalendarModal({ user, onClose }: Props) {
           </div>
         ) : (
           <div>
-            {/* Month labels */}
-            <div style={{ display: 'flex', gap: '2px', marginBottom: '4px', paddingLeft: '32px' }}>
-              {months.map(m => (
-                <div key={m} style={{ width: `${100 / 12}%`, fontSize: 'var(--text-xs)', color: 'var(--text-tertiary)' }}>
-                  {m}
-                </div>
-              ))}
-            </div>
+            <div style={{ overflowX: 'auto', paddingBottom: '4px' }}>
+              {/* Month labels */}
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(53, 14px)', gap: '3px', marginBottom: '6px', paddingLeft: '28px', minWidth: '900px' }}>
+                {months.map((m, i) => {
+                  const firstOfMonth = new Date(year, i, 1);
+                  const dayOfYear = Math.floor((firstOfMonth.getTime() - new Date(year, 0, 1).getTime()) / (1000 * 60 * 60 * 24));
+                  const weekCol = Math.floor((firstDayOfWeek + dayOfYear) / 7) + 1;
+                  return (
+                    <div key={m} style={{ gridColumn: weekCol, fontSize: 'var(--text-xs)', color: 'var(--text-tertiary)', whiteSpace: 'nowrap' }}>
+                      {m}
+                    </div>
+                  );
+                })}
+              </div>
 
-            {/* Heatmap Grid */}
-            <div style={{ display: 'flex', gap: '2px', flexWrap: 'wrap' }}>
-              {days.map(day => (
-                <div
-                  key={day.date}
-                  className="heatmap-day"
-                  style={{
-                    background: getColor(day.study_hours),
-                    cursor: 'pointer',
-                  }}
-                  title={`${day.date}: ${day.study_hours}h studied`}
-                  onClick={() => setSelectedDay(day)}
-                />
-              ))}
+              {/* Heatmap Grid with Weekday Labels */}
+              <div style={{ display: 'flex', gap: '6px', alignItems: 'flex-start', minWidth: '900px' }}>
+                <div style={{ display: 'grid', gridTemplateRows: 'repeat(7, 14px)', gap: '3px', fontSize: '10px', color: 'var(--text-tertiary)', lineHeight: '14px', textAlign: 'right', width: '22px' }}>
+                  <span></span>
+                  <span>Mon</span>
+                  <span></span>
+                  <span>Wed</span>
+                  <span></span>
+                  <span>Fri</span>
+                  <span></span>
+                </div>
+                <div style={{ display: 'grid', gridTemplateRows: 'repeat(7, 14px)', gridAutoFlow: 'column', gap: '3px' }}>
+                  {days.map((day, idx) => {
+                    if (!day) {
+                      return <div key={`empty-${idx}`} style={{ width: '14px', height: '14px' }} />;
+                    }
+                    return (
+                      <div
+                        key={day.date}
+                        className="heatmap-day"
+                        style={{
+                          background: getColor(day.study_hours),
+                          cursor: 'pointer',
+                        }}
+                        title={`${day.date}: ${day.study_hours}h studied`}
+                        onClick={() => setSelectedDay(day)}
+                      />
+                    );
+                  })}
+                </div>
+              </div>
             </div>
 
             {/* Legend */}
@@ -117,7 +146,7 @@ export default function SharedCalendarModal({ user, onClose }: Props) {
               <div className="card mt-4" style={{ padding: 'var(--space-3)' }}>
                 <div className="flex justify-between items-center text-sm">
                   <span className="font-semibold">
-                    {new Date(selectedDay.date).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' })}
+                    {parseLocalDate(selectedDay.date).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' })}
                   </span>
                   <span className="font-bold text-accent">
                     {selectedDay.study_hours > 0 ? `${selectedDay.study_hours}h studied` : 'No study recorded'}
