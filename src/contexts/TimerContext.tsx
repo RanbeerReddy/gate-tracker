@@ -63,31 +63,12 @@ export function TimerProvider({ children }: { children: React.ReactNode }) {
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const lastTickRef = useRef<number>(Date.now());
 
-  // Update elapsed time every second with sleep/drift gap protection
+  // Update elapsed time every second from wall-clock time
   useEffect(() => {
     if (timer.isRunning && !timer.isPaused && timer.startTime) {
       lastTickRef.current = Date.now();
       intervalRef.current = setInterval(() => {
         const now = Date.now();
-        const delta = now - lastTickRef.current;
-        lastTickRef.current = now;
-
-        // Gap detection: if interval was blocked or OS was in sleep/suspend (> 2500ms between 1s ticks)
-        if (delta > 2500) {
-          const sleepGapSeconds = Math.floor((delta - 1000) / 1000);
-          setTimer(prev => {
-            const updatedPauseTime = prev.totalPauseTime + sleepGapSeconds;
-            const totalElapsed = Math.floor((now - prev.startTime!) / 1000);
-            const activeElapsed = Math.max(0, totalElapsed - updatedPauseTime);
-            return {
-              ...prev,
-              totalPauseTime: updatedPauseTime,
-              elapsed: activeElapsed,
-            };
-          });
-          return;
-        }
-
         const totalElapsed = Math.floor((now - timer.startTime!) / 1000);
         const activeElapsed = totalElapsed - timer.totalPauseTime;
         setTimer(prev => ({ ...prev, elapsed: Math.max(0, activeElapsed) }));
