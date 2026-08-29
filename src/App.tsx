@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Routes, Route } from 'react-router-dom';
 import Sidebar from './components/layout/Sidebar';
 import { useTimer } from './contexts/TimerContext';
+import { useAuth } from './contexts/AuthContext';
 import Dashboard from './pages/Dashboard';
 import Study from './pages/Study';
 import Subjects from './pages/Subjects';
@@ -28,6 +29,7 @@ export default function App() {
   const [isFirstRun, setIsFirstRun] = useState<boolean | null>(null);
   const [revisionDueCount, setRevisionDueCount] = useState(0);
   const { timer, formatTime, pauseSession, resumeSession, finishSession } = useTimer();
+  const { syncProgress } = useAuth();
   const [showFinishModal, setShowFinishModal] = useState(false);
   const [finishNotes, setFinishNotes] = useState('');
   const [finishQuestions, setFinishQuestions] = useState(0);
@@ -66,6 +68,9 @@ export default function App() {
       questions_solved: finishQuestions,
       focus_rating: finishRating || undefined,
     });
+
+    // Dynamically sync updated study time to cloud
+    syncProgress().catch(() => {});
 
     // Optionally share safe summary to community if requested
     if (shareWithCommunity) {
