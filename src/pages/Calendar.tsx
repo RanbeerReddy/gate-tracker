@@ -69,7 +69,7 @@ export default function Calendar() {
 
   // Generate calendar days for the selected year
   const getCalendarDays = () => {
-    const days: { date: string; hours: number; sessions: number; events: CalendarEvent[]; isExamDay: boolean }[] = [];
+    const days: ({ date: string; hours: number; sessions: number; events: CalendarEvent[]; isExamDay: boolean } | null)[] = [];
     const start = new Date(year, 0, 1);
     const end = new Date(year, 11, 31);
 
@@ -79,6 +79,12 @@ export default function Calendar() {
       const list = eventsMap.get(e.event_date) || [];
       list.push(e);
       eventsMap.set(e.event_date, list);
+    }
+
+    // Pad beginning of year so Jan 1 is placed on its correct day of week (0: Sun ... 6: Sat)
+    const firstDayOfWeek = start.getDay();
+    for (let i = 0; i < firstDayOfWeek; i++) {
+      days.push(null);
     }
 
     for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
@@ -99,9 +105,10 @@ export default function Calendar() {
   };
 
   const days = getCalendarDays();
+  const validDays = days.filter(Boolean) as { date: string; hours: number; sessions: number; events: CalendarEvent[]; isExamDay: boolean }[];
   const totalHours = heatmap.reduce((s, h) => s + h.hours, 0);
   const daysStudied = heatmap.filter(h => h.hours > 0).length;
-  const maxHours = Math.max(...days.map(d => d.hours), 1);
+  const maxHours = Math.max(...validDays.map(d => d.hours), 1);
 
   const getColor = (hours: number, isExamDay: boolean) => {
     if (isExamDay) return '#EF4444'; // Red highlight for exam day
@@ -114,6 +121,7 @@ export default function Calendar() {
   };
 
   const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  const firstDayOfWeek = new Date(year, 0, 1).getDay();
 
   return (
     <div className="page">
@@ -152,7 +160,7 @@ export default function Calendar() {
               <span style={{ fontSize: '1.25rem' }}>🎯</span>
               <div>
                 <div className="font-bold text-sm" style={{ color: '#F87171' }}>
-                  {examInfo.examName} • {new Date(examInfo.examDate).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}
+                  {examInfo.examName} • {parseLocalDate(examInfo.examDate).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}
                 </div>
                 <div className="text-xs text-secondary">
                   Target GATE Exam Milestone
@@ -177,60 +185,80 @@ export default function Calendar() {
         </div>
       )}
 
-      {/* Month labels */}
-      <div style={{ display: 'flex', gap: '2px', marginBottom: '4px', paddingLeft: '32px' }}>
-        {months.map((m, i) => {
-          const isExamMo = examYear === year && examMonth === i;
-          return (
-            <div
-              key={m}
-              style={{
-                width: `${100 / 12}%`,
-                fontSize: 'var(--text-xs)',
-                fontWeight: isExamMo ? 700 : 400,
-                color: isExamMo ? '#F87171' : 'var(--text-tertiary)',
-              }}
-            >
-              {m} {isExamMo && '★'}
-            </div>
-          );
-        })}
-      </div>
+      {/* Month labels aligned with week columns */}
+      <div style={{ overflowX: 'auto', paddingBottom: '4px' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(53, 14px)', gap: '3px', marginBottom: '6px', paddingLeft: '28px', minWidth: '920px' }}>
+          {months.map((m, i) => {
+            const firstOfMonth = new Date(year, i, 1);
+            const dayOfYear = Math.floor((firstOfMonth.getTime() - new Date(year, 0, 1).getTime()) / (1000 * 60 * 60 * 24));
+            const weekCol = Math.floor((firstDayOfWeek + dayOfYear) / 7) + 1;
+            const isExamMo = examYear === year && examMonth === i;
+            return (
+              <div
+                key={m}
+                style={{
+                  gridColumn: weekCol,
+                  fontSize: 'var(--text-xs)',
+                  fontWeight: isExamMo ? 700 : 400,
+                  color: isExamMo ? '#F87171' : 'var(--text-tertiary)',
+                  whiteSpace: 'nowrap',
+                }}
+              >
+                {m} {isExamMo && '★'}
+              </div>
+            );
+          })}
+        </div>
 
-      {/* Heatmap Grid */}
-      <div style={{ display: 'flex', gap: '2px', flexWrap: 'wrap' }}>
-        {days.map(day => {
-          const hasEvents = day.events.length > 0;
-          return (
-            <div
-              key={day.date}
-              className="heatmap-day"
-              style={{
-                background: getColor(day.hours, day.isExamDay),
-                border: day.isExamDay ? '2px solid #FCA5A5' : hasEvents ? '1px solid #3B82F6' : undefined,
-                position: 'relative',
-                cursor: 'pointer',
-              }}
-              title={`${day.date}: ${day.hours.toFixed(1)}h, ${day.sessions} sessions${day.isExamDay ? ' [★ GATE EXAM]' : ''}${day.events.map(e => ` [${e.name}]`).join('')}`}
-              onClick={() => setSelectedDay(day)}
-            >
-              {day.isExamDay && (
-                <span
+        {/* Heatmap Grid with Weekday Labels */}
+        <div style={{ display: 'flex', gap: '6px', alignItems: 'flex-start', minWidth: '920px' }}>
+          <div style={{ display: 'grid', gridTemplateRows: 'repeat(7, 14px)', gap: '3px', fontSize: '10px', color: 'var(--text-tertiary)', lineHeight: '14px', textAlign: 'right', width: '22px' }}>
+            <span></span>
+            <span>Mon</span>
+            <span></span>
+            <span>Wed</span>
+            <span></span>
+            <span>Fri</span>
+            <span></span>
+          </div>
+          <div style={{ display: 'grid', gridTemplateRows: 'repeat(7, 14px)', gridAutoFlow: 'column', gap: '3px' }}>
+            {days.map((day, idx) => {
+              if (!day) {
+                return <div key={`empty-${idx}`} style={{ width: '14px', height: '14px' }} />;
+              }
+              const hasEvents = day.events.length > 0;
+              return (
+                <div
+                  key={day.date}
+                  className="heatmap-day"
                   style={{
-                    position: 'absolute',
-                    top: '-4px',
-                    right: '-2px',
-                    fontSize: '8px',
-                    color: '#fff',
-                    lineHeight: 1,
+                    background: getColor(day.hours, day.isExamDay),
+                    border: day.isExamDay ? '2px solid #FCA5A5' : hasEvents ? '1px solid #3B82F6' : undefined,
+                    position: 'relative',
+                    cursor: 'pointer',
                   }}
+                  title={`${day.date}: ${day.hours.toFixed(1)}h, ${day.sessions} sessions${day.isExamDay ? ' [★ GATE EXAM]' : ''}${day.events.map(e => ` [${e.name}]`).join('')}`}
+                  onClick={() => setSelectedDay(day)}
                 >
-                  ★
-                </span>
-              )}
-            </div>
-          );
-        })}
+                  {day.isExamDay && (
+                    <span
+                      style={{
+                        position: 'absolute',
+                        top: '-4px',
+                        right: '-2px',
+                        fontSize: '8px',
+                        color: '#fff',
+                        lineHeight: 1,
+                      }}
+                    >
+                      ★
+                    </span>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
       </div>
 
       {/* Legend & Events Key */}
@@ -261,7 +289,7 @@ export default function Calendar() {
           <div className="card-header">
             <div className="flex justify-between items-center w-full">
               <div className="card-title text-sm">
-                {new Date(selectedDay.date).toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })}
+                {parseLocalDate(selectedDay.date).toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })}
               </div>
               {selectedDay.isExamDay && (
                 <span className="tag" style={{ background: 'rgba(239, 68, 68, 0.2)', color: '#EF4444' }}>
@@ -302,7 +330,7 @@ export default function Calendar() {
           {months.map((month, i) => {
             const isExamMo = examYear === year && examMonth === i;
             const monthDays = heatmap.filter(h => {
-              const d = new Date(h.date);
+              const d = parseLocalDate(h.date);
               return d.getMonth() === i;
             });
             const monthHours = monthDays.reduce((s, d) => s + d.hours, 0);
@@ -340,7 +368,7 @@ export default function Calendar() {
                 <div className="stat-value">{Math.round(monthHours)}h</div>
                 <div className="stat-sub">
                   {monthActive} days studied
-                  {isExamMo && ` • Exam: ${new Date(examDateStr).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}`}
+                  {isExamMo && examDateStr && ` • Exam: ${parseLocalDate(examDateStr).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}`}
                 </div>
               </div>
             );
