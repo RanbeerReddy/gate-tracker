@@ -22,17 +22,15 @@ interface AuthContextType {
 
 const DEFAULT_PRIVACY: PrivacySettings = {
   user_id: '',
-  share_profile: false,
-  share_calendar: false,
-  share_study_hours: false,
-  share_question_stats: false,
-  share_syllabus_progress: false,
+  share_profile: true,
+  share_calendar: true,
+  share_study_hours: true,
+  share_question_stats: true,
+  share_syllabus_progress: true,
   share_mock_performance: false,
-  share_subject_progress: false,
+  share_subject_progress: true,
   visibility: 'public',
 };
-
-const AUTH_INITIALIZED_KEY = 'gate-tracker-auth-initialized';
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
@@ -86,21 +84,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // Initialize session and listen for auth state changes
   useEffect(() => {
     const initAuth = async () => {
-      // === CRITICAL FIX: Clear bundled auth session on first launch ===
-      // When the app is packaged, the build machine's Supabase auth tokens
-      // may be persisted in localStorage. On a fresh install, we clear them
-      // so new users don't inherit the developer's session.
-      try {
-        const isInitialized = localStorage.getItem(AUTH_INITIALIZED_KEY);
-        if (!isInitialized) {
-          console.log('First launch detected — clearing any bundled auth session.');
-          clearSupabaseSession();
-          localStorage.setItem(AUTH_INITIALIZED_KEY, 'true');
-        }
-      } catch (_) {
-        // localStorage may be unavailable
-      }
-
       // Load local privacy settings immediately (no network needed)
       const localPrivacy = await loadPrivacyLocally();
       if (localPrivacy) {
@@ -109,22 +92,54 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
       const sb = getSupabase();
 
-      sb.auth.getSession().then(({ data: { session } }) => {
+      try {
+        let { data: { session } } = await sb.auth.getSession();
+
+        // Restore session from SQLite backup if localStorage was cleared on PC reboot
+        if (!session && window.electronAPI?.settings) {
+          try {
+            const savedSessionStr = await window.electronAPI.settings.get('supabase_session');
+            if (savedSessionStr) {
+              const parsed = JSON.parse(savedSessionStr);
+              if (parsed?.access_token && parsed?.refresh_token) {
+                const { data, error } = await sb.auth.setSession({
+                  access_token: parsed.access_token,
+                  refresh_token: parsed.refresh_token,
+                });
+                if (!error && data.session) {
+                  session = data.session;
+                }
+              }
+            }
+          } catch (err) {
+            console.warn('SQLite session restore fallback:', err);
+          }
+        }
+
         if (session?.user) {
           setUser(session.user);
-          loadUserData(session.user.id, session.user);
+          if (window.electronAPI?.settings) {
+            window.electronAPI.settings.set('supabase_session', JSON.stringify(session)).catch(() => {});
+          }
+          await loadUserData(session.user.id, session.user);
+          // Sync local study metrics to cloud on app launch so data is always up to date
+          syncLocalProgressToCloud(session.user.id, localPrivacy || privacySettings).catch(() => {});
         } else {
           setIsLoading(false);
         }
-      }).catch(err => {
+      } catch (err) {
         console.warn('Auth session check fallback (Local Mode):', err);
         setIsLoading(false);
-      });
+      }
 
       const { data: { subscription } } = sb.auth.onAuthStateChange(async (_event, session) => {
         if (session?.user) {
           setUser(session.user);
+          if (window.electronAPI?.settings) {
+            window.electronAPI.settings.set('supabase_session', JSON.stringify(session)).catch(() => {});
+          }
           await loadUserData(session.user.id, session.user);
+          syncLocalProgressToCloud(session.user.id, privacySettings).catch(() => {});
         } else {
           setUser(null);
           setProfile(null);
@@ -201,7 +216,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (error) return { error: error.message };
       if (data.user) {
         setUser(data.user);
+        if (data.session && window.electronAPI?.settings) {
+          window.electronAPI.settings.set('supabase_session', JSON.stringify(data.session)).catch(() => {});
+        }
         await loadUserData(data.user.id, data.user);
+        syncLocalProgressToCloud(data.user.id, privacySettings).catch(() => {});
       }
       return {};
     } catch (err: any) {
@@ -243,7 +262,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
       if (data.user) {
         setUser(data.user);
+        if (data.session && window.electronAPI?.settings) {
+          window.electronAPI.settings.set('supabase_session', JSON.stringify(data.session)).catch(() => {});
+        }
         await loadUserData(data.user.id, data.user);
+        syncLocalProgressToCloud(data.user.id, privacySettings).catch(() => {});
       }
       return {};
     } catch (err: any) {
@@ -259,6 +282,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(null);
     setProfile(null);
     setPrivacySettings(DEFAULT_PRIVACY);
+
+    // Clear SQLite session backup
+    if (window.electronAPI?.settings) {
+      window.electronAPI.settings.set('supabase_session', '').catch(() => {});
+    }
 
     // Restore unauthenticated local privacy settings
     try {
@@ -277,9 +305,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     // Clear all Supabase auth tokens and reset client instance.
     clearSupabaseSession();
-    try {
-      localStorage.removeItem(AUTH_INITIALIZED_KEY);
-    } catch (_) {}
   };
 
   const handleUpdateProfile = async (data: Partial<UserProfile>): Promise<boolean> => {
