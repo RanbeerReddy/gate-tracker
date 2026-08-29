@@ -257,34 +257,34 @@ export default function People() {
                         className="stats-grid mt-3 pt-3 border-t"
                         style={{ borderColor: 'var(--border-primary)', gridTemplateColumns: 'repeat(auto-fit, minmax(110px, 1fr))' }}
                       >
-                        {userItem.privacy?.share_study_hours && (
+                        {(userItem.privacy?.share_study_hours ?? true) && (
                           <div className="stat-card" style={{ padding: '8px' }}>
                             <div className="stat-label">Study Time</div>
-                            <div className="stat-value text-sm">{prog.total_study_hours}h</div>
+                            <div className="stat-value text-sm">{prog.total_study_hours || 0}h</div>
                           </div>
                         )}
-                        {userItem.privacy?.share_study_hours && (
+                        {(userItem.privacy?.share_study_hours ?? true) && (
                           <div className="stat-card" style={{ padding: '8px' }}>
                             <div className="stat-label">Days Active</div>
-                            <div className="stat-value text-sm">{prog.days_studied}</div>
+                            <div className="stat-value text-sm">{prog.days_studied || 0}</div>
                           </div>
                         )}
-                        {userItem.privacy?.share_question_stats && (
+                        {(userItem.privacy?.share_question_stats ?? true) && (
                           <div className="stat-card" style={{ padding: '8px' }}>
                             <div className="stat-label">Questions</div>
-                            <div className="stat-value text-sm">{prog.questions_solved}</div>
+                            <div className="stat-value text-sm">{prog.questions_solved || 0}</div>
                           </div>
                         )}
-                        {userItem.privacy?.share_question_stats && (
+                        {(userItem.privacy?.share_question_stats ?? true) && (
                           <div className="stat-card" style={{ padding: '8px' }}>
                             <div className="stat-label">Accuracy</div>
-                            <div className="stat-value text-sm">{prog.overall_accuracy}%</div>
+                            <div className="stat-value text-sm">{prog.overall_accuracy || 0}%</div>
                           </div>
                         )}
-                        {userItem.privacy?.share_syllabus_progress && (
+                        {(userItem.privacy?.share_syllabus_progress ?? true) && (
                           <div className="stat-card" style={{ padding: '8px' }}>
                             <div className="stat-label">Syllabus</div>
-                            <div className="stat-value text-sm">{prog.syllabus_completion}%</div>
+                            <div className="stat-value text-sm">{prog.syllabus_completion || 0}%</div>
                           </div>
                         )}
                       </div>
@@ -310,14 +310,15 @@ export default function People() {
             {friends.map(f => {
               const friend = f.friend_profile;
               if (!friend) return null;
+              const prog = friend.progress;
               return (
                 <div key={f.id} className="card" style={{ padding: 'var(--space-4)' }}>
                   <div className="flex items-center justify-between flex-wrap gap-2">
                     <div className="flex items-center gap-3">
                       <div
                         style={{
-                          width: '36px',
-                          height: '36px',
+                          width: '40px',
+                          height: '40px',
                           borderRadius: '50%',
                           background: 'var(--accent)',
                           display: 'flex',
@@ -334,6 +335,9 @@ export default function People() {
                         <div className="text-xs text-secondary">
                           @{friend.username} {friend.target_gate_year && `• GATE ${friend.target_gate_year}`}
                         </div>
+                        {friend.bio && (
+                          <div className="text-xs text-tertiary mt-1">{friend.bio}</div>
+                        )}
                       </div>
                     </div>
 
@@ -353,6 +357,45 @@ export default function People() {
                       </button>
                     </div>
                   </div>
+
+                  {/* Friend's Shared Progress Stats */}
+                  {prog && (
+                    <div
+                      className="stats-grid mt-3 pt-3 border-t"
+                      style={{ borderColor: 'var(--border-primary)', gridTemplateColumns: 'repeat(auto-fit, minmax(110px, 1fr))' }}
+                    >
+                      {(friend.privacy?.share_study_hours ?? true) && (
+                        <div className="stat-card" style={{ padding: '8px' }}>
+                          <div className="stat-label">Study Time</div>
+                          <div className="stat-value text-sm">{prog.total_study_hours || 0}h</div>
+                        </div>
+                      )}
+                      {(friend.privacy?.share_study_hours ?? true) && (
+                        <div className="stat-card" style={{ padding: '8px' }}>
+                          <div className="stat-label">Days Active</div>
+                          <div className="stat-value text-sm">{prog.days_studied || 0}</div>
+                        </div>
+                      )}
+                      {(friend.privacy?.share_question_stats ?? true) && (
+                        <div className="stat-card" style={{ padding: '8px' }}>
+                          <div className="stat-label">Questions</div>
+                          <div className="stat-value text-sm">{prog.questions_solved || 0}</div>
+                        </div>
+                      )}
+                      {(friend.privacy?.share_question_stats ?? true) && (
+                        <div className="stat-card" style={{ padding: '8px' }}>
+                          <div className="stat-label">Accuracy</div>
+                          <div className="stat-value text-sm">{prog.overall_accuracy || 0}%</div>
+                        </div>
+                      )}
+                      {(friend.privacy?.share_syllabus_progress ?? true) && (
+                        <div className="stat-card" style={{ padding: '8px' }}>
+                          <div className="stat-label">Syllabus</div>
+                          <div className="stat-value text-sm">{prog.syllabus_completion || 0}%</div>
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
               );
             })}
