@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { useToast } from '../contexts/ToastContext';
 import {
@@ -27,6 +27,34 @@ export default function People() {
   // Shared Calendar Modal state
   const [inspectingUser, setInspectingUser] = useState<UserProfile | null>(null);
 
+  const loadFriendsData = useCallback(async () => {
+    if (!user) return;
+    try {
+      const [f, reqs] = await Promise.all([
+        fetchFriends(user.id),
+        fetchPendingFriendRequests(user.id),
+      ]);
+      setFriends(f);
+      setIncomingRequests(reqs.incoming);
+      setOutgoingRequests(reqs.outgoing);
+    } catch (err) {
+      console.warn('Error loading friends data:', err);
+    }
+  }, [user]);
+
+  const handleSearch = useCallback(async (query: string) => {
+    setSearchQuery(query);
+    setLoading(true);
+    try {
+      const results = await searchUsers(query);
+      setSearchResults(results);
+    } catch (err) {
+      console.warn('Error searching users:', err);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
   useEffect(() => {
     if (isOnline) {
       if (user) {
@@ -34,38 +62,30 @@ export default function People() {
       }
       handleSearch('');
     }
-  }, [user, isOnline]);
-
-  const loadFriendsData = async () => {
-    if (!user) return;
-    const [f, reqs] = await Promise.all([
-      fetchFriends(user.id),
-      fetchPendingFriendRequests(user.id),
-    ]);
-    setFriends(f);
-    setIncomingRequests(reqs.incoming);
-    setOutgoingRequests(reqs.outgoing);
-  };
-
-  const handleSearch = async (query: string) => {
-    setSearchQuery(query);
-    setLoading(true);
-    const results = await searchUsers(query);
-    setSearchResults(results);
-    setLoading(false);
-  };
+  }, [user, isOnline, loadFriendsData, handleSearch]);
 
   const handleSendRequest = async (targetUserId: string) => {
     if (!user) {
       addToast('Sign in to connect with friends', 'info');
       return;
     }
-    const ok = await sendFriendRequest(targetUserId);
-    if (ok) {
-      addToast('Friend request sent', 'success');
-      loadFriendsData();
+    const res = await sendFriendRequest(targetUserId);
+    if (res.success) {
+      if (res.action === 'accepted') {
+        addToast('Friend request accepted! You are now connected.', 'success');
+      } else if (res.action === 'already_sent') {
+        addToast('Friend request is already pending', 'info');
+      } else if (res.action === 'already_friends') {
+        addToast('You are already friends', 'info');
+      } else {
+        addToast('Friend request sent', 'success');
+      }
+      await Promise.all([
+        loadFriendsData(),
+        handleSearch(searchQuery),
+      ]);
     } else {
-      addToast('Failed to send request', 'error');
+      addToast(res.error || 'Failed to send request', 'error');
     }
   };
 
@@ -73,7 +93,12 @@ export default function People() {
     const ok = await respondFriendRequest(friendshipId, accept);
     if (ok) {
       addToast(accept ? 'Friend request accepted' : 'Request declined', 'info');
-      loadFriendsData();
+      await Promise.all([
+        loadFriendsData(),
+        handleSearch(searchQuery),
+      ]);
+    } else {
+      addToast('Could not process request', 'error');
     }
   };
 
@@ -81,7 +106,12 @@ export default function People() {
     const ok = await removeFriend(friendshipId);
     if (ok) {
       addToast('Friend removed', 'info');
-      loadFriendsData();
+      await Promise.all([
+        loadFriendsData(),
+        handleSearch(searchQuery),
+      ]);
+    } else {
+      addToast('Could not remove friend', 'error');
     }
   };
 
@@ -116,7 +146,7 @@ export default function People() {
                 Sign in with an account to search usernames, add study partners, and view shared study heatmaps.
               </div>
             </div>
-            <a href="#/settings" className="btn btn-primary btn-sm">Sign In / Create Account</a>
+            <a href="#/profile" className="btn btn-primary btn-sm">Sign In / Create Account</a>
           </div>
         </div>
       )}
@@ -139,7 +169,23 @@ export default function People() {
           className={`tab ${tab === 'requests' ? 'active' : ''}`}
           onClick={() => setTab('requests')}
         >
-          📬 Requests {incomingRequests.length > 0 && `(${incomingRequests.length})`}
+          📬 Requests
+          {incomingRequests.length > 0 && (
+            <span
+              className="tag"
+              style={{
+                marginLeft: '6px',
+                background: 'var(--accent)',
+                color: '#fff',
+                fontWeight: 700,
+                fontSize: '11px',
+                padding: '1px 6px',
+                borderRadius: '10px',
+              }}
+            >
+              {incomingRequests.length}
+            </span>
+          )}
         </button>
       </div>
 
@@ -172,9 +218,21 @@ export default function People() {
             <div style={{ display: 'grid', gap: 'var(--space-3)' }}>
               {searchResults.map(userItem => {
                 const prog = userItem.progress;
-                const isFriend = friends.some(f => f.friend_profile?.id === userItem.id);
-                const hasPendingOut = outgoingRequests.some(r => r.friend_profile?.id === userItem.id);
-                const hasPendingIn = incomingRequests.some(r => r.friend_profile?.id === userItem.id);
+                const isSelf = userItem.id === user?.id;
+                const isFriend = friends.some(
+                  f => (f.friend_profile?.id || (f.requester_id === user?.id ? f.addressee_id : f.requester_id)) === userItem.id
+                );
+                const incomingReq = incomingRequests.find(
+                  r => (r.friend_profile?.id || r.requester_id) === userItem.id
+                );
+                const outgoingReq = outgoingRequests.find(
+                  r => (r.friend_profile?.id || r.addressee_id) === userItem.id
+                );
+                const hasPendingIn = !!incomingReq;
+                const hasPendingOut = !!outgoingReq;
+
+                const displayName = userItem.display_name || userItem.username || 'GATE Aspirant';
+                const initial = (displayName[0] || 'A').toUpperCase();
 
                 return (
                   <div key={userItem.id} className="card" style={{ padding: 'var(--space-4)' }}>
@@ -182,21 +240,35 @@ export default function People() {
                       <div className="flex items-center gap-3">
                         <div
                           style={{
-                            width: '40px',
-                            height: '40px',
+                            width: '42px',
+                            height: '42px',
                             borderRadius: '50%',
-                            background: 'var(--accent)',
+                            background: userItem.gate_paper === 'EC' ? '#059669' : 'var(--accent)',
                             display: 'flex',
                             alignItems: 'center',
                             justifyContent: 'center',
                             fontWeight: 700,
                             color: '#fff',
+                            fontSize: '1.1rem',
                           }}
                         >
-                          {(userItem.display_name || userItem.username)[0].toUpperCase()}
+                          {initial}
                         </div>
                         <div>
-                          <div className="font-semibold">{userItem.display_name}</div>
+                          <div className="font-semibold flex items-center gap-2">
+                            <span>{displayName}</span>
+                            <span
+                              className="tag"
+                              style={{
+                                fontSize: '10px',
+                                padding: '1px 5px',
+                                background: userItem.gate_paper === 'EC' ? 'rgba(16, 185, 129, 0.15)' : 'rgba(59, 130, 246, 0.15)',
+                                color: userItem.gate_paper === 'EC' ? '#10B981' : '#3B82F6',
+                              }}
+                            >
+                              {userItem.gate_paper === 'EC' ? 'EC' : 'CS'}
+                            </span>
+                          </div>
                           <div className="text-xs text-secondary">
                             @{userItem.username}
                             {userItem.target_gate_year && ` • GATE ${userItem.target_gate_year}`}
@@ -209,7 +281,7 @@ export default function People() {
 
                       {/* Action buttons */}
                       <div className="flex items-center gap-2">
-                        {userItem.privacy?.share_calendar && (
+                        {(userItem.privacy?.share_calendar ?? true) && (
                           <button
                             className="btn btn-secondary btn-sm"
                             onClick={() => setInspectingUser(userItem)}
@@ -218,28 +290,48 @@ export default function People() {
                           </button>
                         )}
 
-                        {userItem.id === user?.id ? (
+                        {isSelf ? (
                           <span className="tag" style={{ background: 'var(--accent-subtle)', color: 'var(--accent)', fontWeight: 600 }}>
                             You (Your Profile)
                           </span>
                         ) : isFriend ? (
-                          <span className="tag" style={{ background: 'var(--success-subtle)', color: 'var(--success)' }}>
+                          <span className="tag" style={{ background: 'var(--success-subtle)', color: 'var(--success)', fontWeight: 600 }}>
                             ✓ Friends
                           </span>
-                        ) : hasPendingOut ? (
-                          <span className="tag" style={{ background: 'var(--bg-tertiary)' }}>
-                            Request Sent
-                          </span>
                         ) : hasPendingIn ? (
-                          <button
-                            className="btn btn-success btn-sm"
-                            onClick={() => {
-                              const req = incomingRequests.find(r => r.friend_profile?.id === userItem.id);
-                              if (req) handleRespond(req.id, true);
-                            }}
-                          >
-                            Accept Request
-                          </button>
+                          <div className="flex gap-2">
+                            <button
+                              className="btn btn-success btn-sm"
+                              onClick={() => {
+                                if (incomingReq) handleRespond(incomingReq.id, true);
+                              }}
+                            >
+                              Accept Request
+                            </button>
+                            <button
+                              className="btn btn-secondary btn-sm"
+                              onClick={() => {
+                                if (incomingReq) handleRespond(incomingReq.id, false);
+                              }}
+                            >
+                              Decline
+                            </button>
+                          </div>
+                        ) : hasPendingOut ? (
+                          <div className="flex items-center gap-2">
+                            <span className="tag" style={{ background: 'var(--bg-tertiary)', color: 'var(--text-secondary)' }}>
+                              Request Sent
+                            </span>
+                            <button
+                              className="btn btn-ghost btn-sm text-danger"
+                              title="Cancel Request"
+                              onClick={() => {
+                                if (outgoingReq) handleRemove(outgoingReq.id);
+                              }}
+                            >
+                              Cancel
+                            </button>
+                          </div>
                         ) : (
                           <button
                             className="btn btn-primary btn-sm"
@@ -311,27 +403,44 @@ export default function People() {
               const friend = f.friend_profile;
               if (!friend) return null;
               const prog = friend.progress;
+              const displayName = friend.display_name || friend.username || 'Friend';
+              const initial = (displayName[0] || 'F').toUpperCase();
+
               return (
                 <div key={f.id} className="card" style={{ padding: 'var(--space-4)' }}>
                   <div className="flex items-center justify-between flex-wrap gap-2">
                     <div className="flex items-center gap-3">
                       <div
                         style={{
-                          width: '40px',
-                          height: '40px',
+                          width: '42px',
+                          height: '42px',
                           borderRadius: '50%',
-                          background: 'var(--accent)',
+                          background: friend.gate_paper === 'EC' ? '#059669' : 'var(--accent)',
                           display: 'flex',
                           alignItems: 'center',
                           justifyContent: 'center',
                           fontWeight: 700,
                           color: '#fff',
+                          fontSize: '1.1rem',
                         }}
                       >
-                        {(friend.display_name || friend.username)[0].toUpperCase()}
+                        {initial}
                       </div>
                       <div>
-                        <div className="font-semibold">{friend.display_name}</div>
+                        <div className="font-semibold flex items-center gap-2">
+                          <span>{displayName}</span>
+                          <span
+                            className="tag"
+                            style={{
+                              fontSize: '10px',
+                              padding: '1px 5px',
+                              background: friend.gate_paper === 'EC' ? 'rgba(16, 185, 129, 0.15)' : 'rgba(59, 130, 246, 0.15)',
+                              color: friend.gate_paper === 'EC' ? '#10B981' : '#3B82F6',
+                            }}
+                          >
+                            {friend.gate_paper === 'EC' ? 'EC' : 'CS'}
+                          </span>
+                        </div>
                         <div className="text-xs text-secondary">
                           @{friend.username} {friend.target_gate_year && `• GATE ${friend.target_gate_year}`}
                         </div>
@@ -359,7 +468,7 @@ export default function People() {
                   </div>
 
                   {/* Friend's Shared Progress Stats */}
-                  {prog && (
+                  {prog ? (
                     <div
                       className="stats-grid mt-3 pt-3 border-t"
                       style={{ borderColor: 'var(--border-primary)', gridTemplateColumns: 'repeat(auto-fit, minmax(110px, 1fr))' }}
@@ -395,6 +504,10 @@ export default function People() {
                         </div>
                       )}
                     </div>
+                  ) : (
+                    <div className="text-xs text-tertiary mt-2 pt-2 border-t" style={{ borderColor: 'var(--border-primary)' }}>
+                      🔒 Progress stats will appear once your friend syncs their study metrics.
+                    </div>
                   )}
                 </div>
               );
@@ -409,21 +522,50 @@ export default function People() {
           <div>
             <div className="section-title">Incoming Requests ({incomingRequests.length})</div>
             {incomingRequests.length === 0 ? (
-              <div className="text-sm text-tertiary">No incoming friend requests.</div>
+              <div className="card text-sm text-tertiary" style={{ padding: 'var(--space-4)' }}>
+                No incoming friend requests.
+              </div>
             ) : (
               <div style={{ display: 'grid', gap: 'var(--space-2)' }}>
-                {incomingRequests.map(r => (
-                  <div key={r.id} className="card flex items-center justify-between" style={{ padding: 'var(--space-3)' }}>
-                    <div>
-                      <div className="font-semibold text-sm">{r.friend_profile?.display_name}</div>
-                      <div className="text-xs text-secondary">@{r.friend_profile?.username}</div>
+                {incomingRequests.map(r => {
+                  const profile = r.friend_profile;
+                  const displayName = profile?.display_name || profile?.username || 'GATE Aspirant';
+                  const initial = (displayName[0] || 'A').toUpperCase();
+
+                  return (
+                    <div key={r.id} className="card flex items-center justify-between flex-wrap gap-2" style={{ padding: 'var(--space-3)' }}>
+                      <div className="flex items-center gap-3">
+                        <div
+                          style={{
+                            width: '36px',
+                            height: '36px',
+                            borderRadius: '50%',
+                            background: profile?.gate_paper === 'EC' ? '#059669' : 'var(--accent)',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            fontWeight: 700,
+                            color: '#fff',
+                            fontSize: '0.95rem',
+                          }}
+                        >
+                          {initial}
+                        </div>
+                        <div>
+                          <div className="font-semibold text-sm">{displayName}</div>
+                          <div className="text-xs text-secondary">
+                            @{profile?.username}
+                            {profile?.target_gate_year && ` • GATE ${profile.target_gate_year}`}
+                          </div>
+                        </div>
+                      </div>
+                      <div className="flex gap-2">
+                        <button className="btn btn-success btn-sm" onClick={() => handleRespond(r.id, true)}>Accept</button>
+                        <button className="btn btn-secondary btn-sm" onClick={() => handleRespond(r.id, false)}>Decline</button>
+                      </div>
                     </div>
-                    <div className="flex gap-2">
-                      <button className="btn btn-success btn-sm" onClick={() => handleRespond(r.id, true)}>Accept</button>
-                      <button className="btn btn-secondary btn-sm" onClick={() => handleRespond(r.id, false)}>Decline</button>
-                    </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             )}
           </div>
@@ -431,18 +573,47 @@ export default function People() {
           <div>
             <div className="section-title">Sent Requests ({outgoingRequests.length})</div>
             {outgoingRequests.length === 0 ? (
-              <div className="text-sm text-tertiary">No sent requests pending.</div>
+              <div className="card text-sm text-tertiary" style={{ padding: 'var(--space-4)' }}>
+                No sent requests pending.
+              </div>
             ) : (
               <div style={{ display: 'grid', gap: 'var(--space-2)' }}>
-                {outgoingRequests.map(r => (
-                  <div key={r.id} className="card flex items-center justify-between" style={{ padding: 'var(--space-3)' }}>
-                    <div>
-                      <div className="font-semibold text-sm">{r.friend_profile?.display_name}</div>
-                      <div className="text-xs text-secondary">@{r.friend_profile?.username}</div>
+                {outgoingRequests.map(r => {
+                  const profile = r.friend_profile;
+                  const displayName = profile?.display_name || profile?.username || 'GATE Aspirant';
+                  const initial = (displayName[0] || 'A').toUpperCase();
+
+                  return (
+                    <div key={r.id} className="card flex items-center justify-between flex-wrap gap-2" style={{ padding: 'var(--space-3)' }}>
+                      <div className="flex items-center gap-3">
+                        <div
+                          style={{
+                            width: '36px',
+                            height: '36px',
+                            borderRadius: '50%',
+                            background: profile?.gate_paper === 'EC' ? '#059669' : 'var(--accent)',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            fontWeight: 700,
+                            color: '#fff',
+                            fontSize: '0.95rem',
+                          }}
+                        >
+                          {initial}
+                        </div>
+                        <div>
+                          <div className="font-semibold text-sm">{displayName}</div>
+                          <div className="text-xs text-secondary">
+                            @{profile?.username}
+                            {profile?.target_gate_year && ` • GATE ${profile.target_gate_year}`}
+                          </div>
+                        </div>
+                      </div>
+                      <button className="btn btn-ghost btn-sm text-danger" onClick={() => handleRemove(r.id)}>Cancel</button>
                     </div>
-                    <button className="btn btn-ghost btn-sm text-danger" onClick={() => handleRemove(r.id)}>Cancel</button>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             )}
           </div>

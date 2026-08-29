@@ -28,7 +28,7 @@ export async function syncLocalProgressToCloud(userId: string, privacy: PrivacyS
         syllabus_completion: 0,
         subject_progress: [],
         updated_at: new Date().toISOString(),
-      });
+      }, { onConflict: 'user_id' });
     } else {
       // Query local SQLite metrics via electronAPI
       const [dashboard, heatmap, studyStats, questionStats] = await Promise.all([
@@ -94,9 +94,9 @@ export async function syncLocalProgressToCloud(userId: string, privacy: PrivacyS
       };
 
       // Try upsert with gate_paper, fallback to basePayload if column not in remote DB
-      const { error: upsertErr } = await sb.from('shared_progress').upsert({ ...basePayload, gate_paper: activePaper });
+      const { error: upsertErr } = await sb.from('shared_progress').upsert({ ...basePayload, gate_paper: activePaper }, { onConflict: 'user_id' });
       if (upsertErr) {
-        await sb.from('shared_progress').upsert(basePayload);
+        await sb.from('shared_progress').upsert(basePayload, { onConflict: 'user_id' });
       }
       
       // Update profile track safely

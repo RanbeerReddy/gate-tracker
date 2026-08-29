@@ -265,8 +265,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         if (data.session && window.electronAPI?.settings) {
           window.electronAPI.settings.set('supabase_session', JSON.stringify(data.session)).catch(() => {});
         }
+        // Initialize cloud privacy with active defaults so progress and calendar are visible
+        try {
+          await updatePrivacySettings(data.user.id, {
+            share_profile: true,
+            share_calendar: true,
+            share_study_hours: true,
+            share_question_stats: true,
+            share_syllabus_progress: true,
+            share_subject_progress: true,
+          });
+        } catch (_) {}
+
         await loadUserData(data.user.id, data.user);
-        syncLocalProgressToCloud(data.user.id, privacySettings).catch(() => {});
+        syncLocalProgressToCloud(data.user.id, DEFAULT_PRIVACY).catch(() => {});
       }
       return {};
     } catch (err: any) {

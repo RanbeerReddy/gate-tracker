@@ -437,6 +437,53 @@ export async function blockUser(blockedId: string): Promise<boolean> {
 // USER SEARCH & PEOPLE
 // ==========================================
 
+export interface FriendRequestResult {
+  success: boolean;
+  action: 'sent' | 'accepted' | 'already_sent' | 'already_friends';
+  error?: string;
+}
+
+function normalizeUserProfile(raw: any, privacyRaw?: any, progressRaw?: any): UserProfile {
+  const unwrappedProfile = Array.isArray(raw) ? raw[0] : raw;
+  if (!unwrappedProfile) {
+    return {
+      id: '',
+      username: 'user',
+      display_name: 'GATE Aspirant',
+      gate_paper: 'CS',
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
+  }
+
+  const pRaw = privacyRaw !== undefined ? privacyRaw : unwrappedProfile.privacy;
+  const progRaw = progressRaw !== undefined ? progressRaw : unwrappedProfile.progress;
+
+  const pObj = Array.isArray(pRaw) ? pRaw[0] : pRaw;
+  const progObj = Array.isArray(progRaw) ? progRaw[0] : progRaw;
+
+  const effectivePrivacy: PrivacySettings = {
+    user_id: unwrappedProfile.id,
+    share_profile: pObj?.share_profile ?? true,
+    share_calendar: pObj?.share_calendar ?? true,
+    share_study_hours: pObj?.share_study_hours ?? true,
+    share_question_stats: pObj?.share_question_stats ?? true,
+    share_syllabus_progress: pObj?.share_syllabus_progress ?? true,
+    share_mock_performance: pObj?.share_mock_performance ?? false,
+    share_subject_progress: pObj?.share_subject_progress ?? true,
+    visibility: pObj?.visibility || 'public',
+  };
+
+  const isPublic = effectivePrivacy.share_profile;
+
+  return {
+    ...unwrappedProfile,
+    gate_paper: unwrappedProfile.gate_paper || 'CS',
+    privacy: effectivePrivacy,
+    progress: isPublic ? (progObj || undefined) : undefined,
+  };
+}
+
 export async function searchUsers(query: string = ''): Promise<UserProfile[]> {
   try {
     const sb = getSupabase();
@@ -448,7 +495,7 @@ export async function searchUsers(query: string = ''): Promise<UserProfile[]> {
         progress:shared_progress(*)
       `)
       .order('updated_at', { ascending: false })
-      .limit(25);
+      .limit(30);
 
     const trimmed = query.trim();
     if (trimmed) {
@@ -458,17 +505,7 @@ export async function searchUsers(query: string = ''): Promise<UserProfile[]> {
     const { data, error } = await q;
     if (error) throw error;
 
-    return (data || []).map((p: any) => {
-      const privacy = Array.isArray(p.privacy) ? p.privacy[0] : p.privacy;
-      const progress = Array.isArray(p.progress) ? p.progress[0] : p.progress;
-      const isPublic = privacy?.share_profile ?? false;
-      return {
-        ...p,
-        gate_paper: p.gate_paper || 'CS',
-        privacy: privacy || undefined,
-        progress: isPublic ? progress : undefined,
-      };
-    });
+    return (data || []).map((p: any) => normalizeUserProfile(p, p.privacy, p.progress));
   } catch (err) {
     console.warn('User search error:', err);
     return [];
@@ -482,38 +519,50 @@ export async function searchUsers(query: string = ''): Promise<UserProfile[]> {
 export async function fetchFriends(userId: string): Promise<Friendship[]> {
   try {
     const sb = getSupabase();
-    const { data, error } = await sb
+    // 1. Fetch accepted friendships
+    const { data: friendships, error: friendErr } = await sb
       .from('friendships')
+      .select('*')
+      .or(`requester_id.eq.${userId},addressee_id.eq.${userId}`)
+      .eq('status', 'accepted')
+      .order('updated_at', { ascending: false });
+
+    if (friendErr) throw friendErr;
+    if (!friendships || friendships.length === 0) return [];
+
+    // 2. Extract friend user IDs
+    const friendUserIds = Array.from(new Set(
+      friendships.map(f => f.requester_id === userId ? f.addressee_id : f.requester_id).filter(Boolean)
+    ));
+
+    if (friendUserIds.length === 0) return [];
+
+    // 3. Batch fetch profiles, privacy, and shared progress for all friends
+    const { data: profiles } = await sb
+      .from('profiles')
       .select(`
         *,
-        requester:profiles!friendships_requester_id_fkey(
-          id, username, display_name, avatar_url, target_gate_year, gate_paper, bio,
-          privacy:privacy_settings(*),
-          progress:shared_progress(*)
-        ),
-        addressee:profiles!friendships_addressee_id_fkey(
-          id, username, display_name, avatar_url, target_gate_year, gate_paper, bio,
-          privacy:privacy_settings(*),
-          progress:shared_progress(*)
-        )
+        privacy:privacy_settings(*),
+        progress:shared_progress(*)
       `)
-      .or(`requester_id.eq.${userId},addressee_id.eq.${userId}`)
-      .eq('status', 'accepted');
+      .in('id', friendUserIds);
 
-    if (error) throw error;
+    const profileMap = new Map<string, UserProfile>();
+    (profiles || []).forEach((p: any) => {
+      profileMap.set(p.id, normalizeUserProfile(p, p.privacy, p.progress));
+    });
 
-    return (data || []).map((f: any) => {
-      const rawFriend = f.requester_id === userId ? f.addressee : f.requester;
-      if (!rawFriend) return f;
-      const privacy = Array.isArray(rawFriend.privacy) ? rawFriend.privacy[0] : rawFriend.privacy;
-      const progress = Array.isArray(rawFriend.progress) ? rawFriend.progress[0] : rawFriend.progress;
+    return friendships.map(f => {
+      const friendId = f.requester_id === userId ? f.addressee_id : f.requester_id;
       return {
         ...f,
-        friend_profile: {
-          ...rawFriend,
-          gate_paper: rawFriend.gate_paper || 'CS',
-          privacy: privacy || undefined,
-          progress: (privacy?.share_profile ?? true) ? progress : undefined,
+        friend_profile: profileMap.get(friendId) || {
+          id: friendId,
+          username: 'user',
+          display_name: 'Friend',
+          gate_paper: 'CS',
+          created_at: f.created_at,
+          updated_at: f.updated_at,
         },
       };
     });
@@ -526,45 +575,62 @@ export async function fetchFriends(userId: string): Promise<Friendship[]> {
 export async function fetchPendingFriendRequests(userId: string): Promise<{ incoming: Friendship[]; outgoing: Friendship[] }> {
   try {
     const sb = getSupabase();
-    const { data, error } = await sb
+    // 1. Fetch pending friendships
+    const { data: friendships, error: reqErr } = await sb
       .from('friendships')
+      .select('*')
+      .or(`requester_id.eq.${userId},addressee_id.eq.${userId}`)
+      .eq('status', 'pending')
+      .order('created_at', { ascending: false });
+
+    if (reqErr) throw reqErr;
+    if (!friendships || friendships.length === 0) return { incoming: [], outgoing: [] };
+
+    // 2. Extract involved other user IDs
+    const otherUserIds = Array.from(new Set(
+      friendships.map(f => f.requester_id === userId ? f.addressee_id : f.requester_id).filter(Boolean)
+    ));
+
+    // 3. Batch fetch profiles, privacy, and shared progress
+    const { data: profiles } = await sb
+      .from('profiles')
       .select(`
         *,
-        requester:profiles!friendships_requester_id_fkey(
-          id, username, display_name, avatar_url, target_gate_year, gate_paper, bio,
-          privacy:privacy_settings(*),
-          progress:shared_progress(*)
-        ),
-        addressee:profiles!friendships_addressee_id_fkey(
-          id, username, display_name, avatar_url, target_gate_year, gate_paper, bio,
-          privacy:privacy_settings(*),
-          progress:shared_progress(*)
-        )
+        privacy:privacy_settings(*),
+        progress:shared_progress(*)
       `)
-      .or(`requester_id.eq.${userId},addressee_id.eq.${userId}`)
-      .eq('status', 'pending');
+      .in('id', otherUserIds);
 
-    if (error) throw error;
+    const profileMap = new Map<string, UserProfile>();
+    (profiles || []).forEach((p: any) => {
+      profileMap.set(p.id, normalizeUserProfile(p, p.privacy, p.progress));
+    });
 
-    const normalizeFriend = (raw: any) => {
-      if (!raw) return raw;
-      const privacy = Array.isArray(raw.privacy) ? raw.privacy[0] : raw.privacy;
-      const progress = Array.isArray(raw.progress) ? raw.progress[0] : raw.progress;
-      return {
-        ...raw,
-        gate_paper: raw.gate_paper || 'CS',
-        privacy: privacy || undefined,
-        progress: (privacy?.share_profile ?? true) ? progress : undefined,
+    const incoming: Friendship[] = [];
+    const outgoing: Friendship[] = [];
+
+    friendships.forEach(f => {
+      const otherId = f.requester_id === userId ? f.addressee_id : f.requester_id;
+      const friendProfile = profileMap.get(otherId) || {
+        id: otherId,
+        username: 'user',
+        display_name: 'GATE Aspirant',
+        gate_paper: 'CS',
+        created_at: f.created_at,
+        updated_at: f.updated_at,
       };
-    };
 
-    const incoming = (data || [])
-      .filter((f: any) => f.addressee_id === userId)
-      .map((f: any) => ({ ...f, friend_profile: normalizeFriend(f.requester) }));
+      const enriched: Friendship = {
+        ...f,
+        friend_profile: friendProfile,
+      };
 
-    const outgoing = (data || [])
-      .filter((f: any) => f.requester_id === userId)
-      .map((f: any) => ({ ...f, friend_profile: normalizeFriend(f.addressee) }));
+      if (f.addressee_id === userId) {
+        incoming.push(enriched);
+      } else {
+        outgoing.push(enriched);
+      }
+    });
 
     return { incoming, outgoing };
   } catch (err) {
@@ -573,24 +639,99 @@ export async function fetchPendingFriendRequests(userId: string): Promise<{ inco
   }
 }
 
-export async function sendFriendRequest(targetUserId: string): Promise<boolean> {
+export async function sendFriendRequest(targetUserId: string): Promise<FriendRequestResult> {
   try {
     const sb = getSupabase();
     const { data: sessionData } = await sb.auth.getSession();
     const userId = sessionData?.session?.user?.id;
-    if (!userId || userId === targetUserId) return false;
+    if (!userId) return { success: false, action: 'sent', error: 'Please sign in to add friends' };
+    if (userId === targetUserId) return { success: false, action: 'sent', error: 'You cannot add yourself as a friend' };
 
-    const { error } = await sb.from('friendships').insert({
+    // Check for existing friendship record in either direction
+    const { data: existingRecords, error: searchErr } = await sb
+      .from('friendships')
+      .select('*')
+      .or(`and(requester_id.eq.${userId},addressee_id.eq.${targetUserId}),and(requester_id.eq.${targetUserId},addressee_id.eq.${userId})`);
+
+    if (searchErr) {
+      console.warn('Friendship existing check warning:', searchErr);
+    }
+
+    const existing = existingRecords && existingRecords.length > 0 ? existingRecords[0] : null;
+
+    if (existing) {
+      // 1. If already friends
+      if (existing.status === 'accepted') {
+        return { success: true, action: 'already_friends' };
+      }
+
+      // 2. If the friend already sent a pending request to YOU, automatically accept it!
+      if (existing.requester_id === targetUserId && existing.addressee_id === userId) {
+        const { error: acceptErr } = await sb
+          .from('friendships')
+          .update({
+            status: 'accepted',
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', existing.id);
+
+        if (acceptErr) throw acceptErr;
+        return { success: true, action: 'accepted' };
+      }
+
+      // 3. If you already sent a pending request to them
+      if (existing.requester_id === userId && existing.addressee_id === targetUserId && existing.status === 'pending') {
+        return { success: true, action: 'already_sent' };
+      }
+
+      // 4. If previously rejected, blocked, or deleted, update and reactivate as pending request
+      const { error: updateErr } = await sb
+        .from('friendships')
+        .update({
+          requester_id: userId,
+          addressee_id: targetUserId,
+          status: 'pending',
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', existing.id);
+
+      if (updateErr) throw updateErr;
+      return { success: true, action: 'sent' };
+    }
+
+    // No existing record — insert a clean new pending request
+    const { error: insertErr } = await sb.from('friendships').insert({
       requester_id: userId,
       addressee_id: targetUserId,
       status: 'pending',
     });
 
-    if (error) throw error;
-    return true;
-  } catch (err) {
+    if (insertErr) {
+      // Fallback: If duplicate key hit due to concurrent request, check again and accept/confirm
+      const { data: retryCheck } = await sb
+        .from('friendships')
+        .select('*')
+        .or(`and(requester_id.eq.${userId},addressee_id.eq.${targetUserId}),and(requester_id.eq.${targetUserId},addressee_id.eq.${userId})`)
+        .maybeSingle();
+
+      if (retryCheck) {
+        if (retryCheck.requester_id === targetUserId) {
+          await sb.from('friendships').update({ status: 'accepted', updated_at: new Date().toISOString() }).eq('id', retryCheck.id);
+          return { success: true, action: 'accepted' };
+        }
+        return { success: true, action: 'already_sent' };
+      }
+      throw insertErr;
+    }
+
+    return { success: true, action: 'sent' };
+  } catch (err: any) {
     console.error('Error sending friend request:', err);
-    return false;
+    return {
+      success: false,
+      action: 'sent',
+      error: err?.message || 'Failed to send request',
+    };
   }
 }
 

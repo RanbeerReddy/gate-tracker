@@ -20,16 +20,16 @@ CREATE TABLE IF NOT EXISTS public.profiles (
     CONSTRAINT username_length CHECK (char_length(username) >= 3 AND char_length(username) <= 30)
 );
 
--- 2. PRIVACY SETTINGS TABLE (Defaults to ALL OFF for strict privacy)
+-- 2. PRIVACY SETTINGS TABLE (Defaults to active sharing for connected features)
 CREATE TABLE IF NOT EXISTS public.privacy_settings (
     user_id UUID PRIMARY KEY REFERENCES public.profiles(id) ON DELETE CASCADE,
-    share_profile BOOLEAN DEFAULT false,
-    share_calendar BOOLEAN DEFAULT false,
-    share_study_hours BOOLEAN DEFAULT false,
-    share_question_stats BOOLEAN DEFAULT false,
-    share_syllabus_progress BOOLEAN DEFAULT false,
+    share_profile BOOLEAN DEFAULT true,
+    share_calendar BOOLEAN DEFAULT true,
+    share_study_hours BOOLEAN DEFAULT true,
+    share_question_stats BOOLEAN DEFAULT true,
+    share_syllabus_progress BOOLEAN DEFAULT true,
     share_mock_performance BOOLEAN DEFAULT false,
-    share_subject_progress BOOLEAN DEFAULT false,
+    share_subject_progress BOOLEAN DEFAULT true,
     visibility TEXT DEFAULT 'public' CHECK (visibility IN ('public', 'friends', 'private')),
     updated_at TIMESTAMPTZ DEFAULT NOW()
 );
@@ -157,9 +157,9 @@ CREATE POLICY "Users can insert their own profile" ON public.profiles
 CREATE POLICY "Users can update own profile" ON public.profiles
     FOR UPDATE USING (auth.uid() = id);
 
--- Privacy Settings: User can view and update their own privacy settings
-CREATE POLICY "Users can view own privacy settings" ON public.privacy_settings
-    FOR SELECT USING (auth.uid() = user_id);
+-- Privacy Settings: Public read for permissions evaluation, user can update own settings
+CREATE POLICY "Privacy settings are viewable by everyone" ON public.privacy_settings
+    FOR SELECT USING (true);
 
 CREATE POLICY "Users can insert own privacy settings" ON public.privacy_settings
     FOR INSERT WITH CHECK (auth.uid() = user_id);
@@ -174,7 +174,12 @@ CREATE POLICY "View shared progress if permitted" ON public.shared_progress
         EXISTS (
             SELECT 1 FROM public.privacy_settings ps
             WHERE ps.user_id = shared_progress.user_id
-            AND ps.share_profile = true
+            AND (
+                ps.share_profile = true OR
+                ps.share_study_hours = true OR
+                ps.share_question_stats = true OR
+                ps.share_syllabus_progress = true
+            )
         )
     );
 
