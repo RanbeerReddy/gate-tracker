@@ -65,6 +65,11 @@ export async function syncLocalProgressToCloud(userId: string, privacy: PrivacyS
         ? Math.round(((syllabus.completed + (syllabus as any).strong || 0) / syllabus.total_topics) * 100)
         : 0;
 
+      // Calculate questions and accuracy from questionStats and dashboard
+      const totalQuestions = (questionStats?.dailyQuestions || []).reduce((acc: number, d: any) => acc + (d.total || 0), 0) || (dashboard.week?.questionsSolved || 0);
+      const totalCorrect = (questionStats?.dailyQuestions || []).reduce((acc: number, d: any) => acc + (d.correct || 0), 0) || (dashboard.week?.questionsCorrect || 0);
+      const overallAccuracy = totalQuestions > 0 ? Math.round((totalCorrect / totalQuestions) * 100) : (dashboard.week?.accuracy || 0);
+
       // Calculate subject completion list
       const subjectProgress = (dashboard.subjectCompletion || []).map((s: any) => ({
         name: s.name,
@@ -82,8 +87,8 @@ export async function syncLocalProgressToCloud(userId: string, privacy: PrivacyS
         total_study_hours: privacy.share_study_hours ? totalHours : 0,
         days_studied: privacy.share_study_hours ? daysStudied : 0,
         current_streak: privacy.share_study_hours ? streak : 0,
-        questions_solved: privacy.share_question_stats ? (questionStats?.total_questions || 0) : 0,
-        overall_accuracy: privacy.share_question_stats ? Math.round(questionStats?.overall_accuracy || 0) : 0,
+        questions_solved: privacy.share_question_stats ? totalQuestions : 0,
+        overall_accuracy: privacy.share_question_stats ? overallAccuracy : 0,
         syllabus_completion: privacy.share_syllabus_progress ? syllabusPercent : 0,
         subject_progress: privacy.share_subject_progress ? subjectProgress : [],
       };
