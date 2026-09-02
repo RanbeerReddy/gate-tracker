@@ -31,20 +31,21 @@ export async function syncLocalProgressToCloud(userId: string, privacy: PrivacyS
       }, { onConflict: 'user_id' });
     } else {
       // Query local SQLite metrics via electronAPI
-      const [dashboard, heatmap, studyStats, questionStats] = await Promise.all([
+      const [dashboard, allHeatmap] = await Promise.all([
         window.electronAPI.analytics.getDashboard(),
-        window.electronAPI.analytics.getHeatmap(new Date().getFullYear()),
-        window.electronAPI.analytics.getStudyAnalytics({ days: 365 }),
-        window.electronAPI.analytics.getQuestionAnalytics({ days: 365 }),
+        window.electronAPI.analytics.getHeatmap('ALL'),
       ]);
 
-      const totalHours = Math.round((studyStats?.totals?.total_hours || (dashboard.week?.studySeconds || 0) / 3600) * 10) / 10;
-      const daysStudied = heatmap.filter((h: any) => h.hours > 0).length;
+      const lifetime = dashboard.lifetime || {};
+      const totalHours = Math.round(((lifetime.studySeconds || dashboard.week?.studySeconds || 0) / 3600) * 10) / 10;
+      
+      const activeDaysList = (allHeatmap || []).filter((h: any) => h.hours > 0);
+      const daysStudied = lifetime.daysStudied || activeDaysList.length;
 
       // Calculate current study streak using exact local calendar days
       let streak = 0;
       const today = new Date();
-      const heatmapMap = new Map(heatmap.map((h: any) => [h.date, h.hours]));
+      const heatmapMap = new Map((allHeatmap || []).map((h: any) => [h.date, h.hours]));
 
       for (let i = 0; i < 365; i++) {
         const d = new Date(today);
@@ -62,21 +63,26 @@ export async function syncLocalProgressToCloud(userId: string, privacy: PrivacyS
       // Calculate syllabus completion %
       const syllabus = dashboard.syllabus;
       const syllabusPercent = syllabus?.total_topics > 0
-        ? Math.round(((syllabus.completed + (syllabus as any).strong || 0) / syllabus.total_topics) * 100)
+        ? Math.round(((syllabus.completed + ((syllabus as any).strong || 0)) / syllabus.total_topics) * 100)
         : 0;
 
-      // Calculate questions and accuracy from questionStats and dashboard
-      const totalQuestions = (questionStats?.dailyQuestions || []).reduce((acc: number, d: any) => acc + (d.total || 0), 0) || (dashboard.week?.questionsSolved || 0);
-      const totalCorrect = (questionStats?.dailyQuestions || []).reduce((acc: number, d: any) => acc + (d.correct || 0), 0) || (dashboard.week?.questionsCorrect || 0);
-      const overallAccuracy = totalQuestions > 0 ? Math.round((totalCorrect / totalQuestions) * 100) : (dashboard.week?.accuracy || 0);
+      // Calculate questions and accuracy
+      const totalQuestions = lifetime.questionsSolved ?? (dashboard.week?.questionsSolved || 0);
+      const totalCorrect = lifetime.questionsCorrect ?? (dashboard.week?.questionsCorrect || 0);
+      const overallAccuracy = totalQuestions > 0
+        ? Math.round((totalCorrect / totalQuestions) * 100)
+        : (dashboard.week?.accuracy || 0);
 
       // Calculate subject completion list
-      const subjectProgress = (dashboard.subjectCompletion || []).map((s: any) => ({
-        name: s.name,
-        color: s.color,
-        completion: s.percent || 0,
-        hours: Math.round((s.study_seconds || 0) / 3600),
-      }));
+      const subjectProgress = (dashboard.subjectCompletion || []).map((s: any) => {
+        const comp = s.total_topics > 0 ? Math.round((s.completed_topics / s.total_topics) * 100) : (s.percent || 0);
+        return {
+          name: s.name,
+          color: s.color,
+          completion: comp,
+          hours: Math.round(((s.total_seconds || s.study_seconds || 0) / 3600) * 10) / 10,
+        };
+      });
 
       const activePaper = dashboard.activePaper || (await window.electronAPI.settings.get('gate_paper')) || 'CS';
 
@@ -94,7 +100,10 @@ export async function syncLocalProgressToCloud(userId: string, privacy: PrivacyS
       };
 
       // Try upsert with gate_paper, fallback to basePayload if column not in remote DB
-      const { error: upsertErr } = await sb.from('shared_progress').upsert({ ...basePayload, gate_paper: activePaper }, { onConflict: 'user_id' });
+      const { error: upsertErr } = await sb.from('shared_progress').upsert(
+        { ...basePayload, gate_paper: activePaper },
+        { onConflict: 'user_id' }
+      );
       if (upsertErr) {
         await sb.from('shared_progress').upsert(basePayload, { onConflict: 'user_id' });
       }
@@ -105,12 +114,11 @@ export async function syncLocalProgressToCloud(userId: string, privacy: PrivacyS
       } catch (_) {}
     }
 
-    // 2. Sync Shared Study Calendar (Sanitized Daily Hours Only)
+    // 2. Sync Shared Study Calendar (Sanitized Daily Hours across ALL years)
     if (privacy.share_calendar) {
-      const currentYear = new Date().getFullYear();
-      const heatmap = await window.electronAPI.analytics.getHeatmap(currentYear);
+      const allHeatmap = await window.electronAPI.analytics.getHeatmap('ALL');
       
-      const calendarRows = heatmap
+      const calendarRows = (allHeatmap || [])
         .filter((h: any) => h.hours > 0)
         .map((h: any) => ({
           user_id: userId,
@@ -121,7 +129,12 @@ export async function syncLocalProgressToCloud(userId: string, privacy: PrivacyS
         }));
 
       if (calendarRows.length > 0) {
-        await sb.from('shared_calendar').upsert(calendarRows, { onConflict: 'user_id,date' });
+        // Upsert in batches of 100 to avoid payload size issues
+        const CHUNK_SIZE = 100;
+        for (let i = 0; i < calendarRows.length; i += CHUNK_SIZE) {
+          const chunk = calendarRows.slice(i, i + CHUNK_SIZE);
+          await sb.from('shared_calendar').upsert(chunk, { onConflict: 'user_id,date' });
+        }
       }
     } else {
       // If calendar sharing disabled, clear entries
