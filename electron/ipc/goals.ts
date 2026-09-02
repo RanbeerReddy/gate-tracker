@@ -35,65 +35,48 @@ export function registerGoalHandlers(): void {
     return goals.map(goal => {
       let currentValue = 0;
       const targetPaper = goal.gate_paper && goal.gate_paper !== 'ALL' ? goal.gate_paper : activePaper;
+      const startDate = goal.type === 'daily' ? today : goal.type === 'weekly' ? weekStart : monthStart;
       
-      if (goal.type === 'daily') {
-        if (goal.metric === 'study_hours') {
-          const result = db.prepare(`
-            SELECT COALESCE(SUM(ss.duration_seconds), 0) / 3600.0 as hours
-            FROM study_sessions ss
-            LEFT JOIN subjects s ON ss.subject_id = s.id
-            WHERE date(ss.start_time) = ? AND ss.is_active = 0
-              AND (s.id IS NULL OR s.gate_paper = ? OR s.gate_paper = 'SHARED' OR s.gate_paper = 'ALL')
-          `).get(today, targetPaper) as any;
-          currentValue = result.hours || 0;
-        } else if (goal.metric === 'questions') {
-          const result = db.prepare(`
-            SELECT COUNT(*) as count FROM questions q
-            LEFT JOIN subjects s ON q.subject_id = s.id
-            WHERE date(q.created_at) = ?
-              AND (s.id IS NULL OR s.gate_paper = ? OR s.gate_paper = 'SHARED' OR s.gate_paper = 'ALL')
-          `).get(today, targetPaper) as any;
-          currentValue = result.count || 0;
-        }
-      } else if (goal.type === 'weekly') {
-        // Standard Monday -> Sunday calendar week
-        if (goal.metric === 'study_hours') {
-          const result = db.prepare(`
-            SELECT COALESCE(SUM(ss.duration_seconds), 0) / 3600.0 as hours
-            FROM study_sessions ss
-            LEFT JOIN subjects s ON ss.subject_id = s.id
-            WHERE date(ss.start_time) >= ? AND ss.is_active = 0
-              AND (s.id IS NULL OR s.gate_paper = ? OR s.gate_paper = 'SHARED' OR s.gate_paper = 'ALL')
-          `).get(weekStart, targetPaper) as any;
-          currentValue = result.hours || 0;
-        } else if (goal.metric === 'questions') {
-          const result = db.prepare(`
-            SELECT COUNT(*) as count FROM questions q
-            LEFT JOIN subjects s ON q.subject_id = s.id
-            WHERE date(q.created_at) >= ?
-              AND (s.id IS NULL OR s.gate_paper = ? OR s.gate_paper = 'SHARED' OR s.gate_paper = 'ALL')
-          `).get(weekStart, targetPaper) as any;
-          currentValue = result.count || 0;
-        }
-      } else if (goal.type === 'monthly') {
-        if (goal.metric === 'study_hours') {
-          const result = db.prepare(`
-            SELECT COALESCE(SUM(ss.duration_seconds), 0) / 3600.0 as hours
-            FROM study_sessions ss
-            LEFT JOIN subjects s ON ss.subject_id = s.id
-            WHERE date(ss.start_time) >= ? AND ss.is_active = 0
-              AND (s.id IS NULL OR s.gate_paper = ? OR s.gate_paper = 'SHARED' OR s.gate_paper = 'ALL')
-          `).get(monthStart, targetPaper) as any;
-          currentValue = result.hours || 0;
-        } else if (goal.metric === 'questions') {
-          const result = db.prepare(`
-            SELECT COUNT(*) as count FROM questions q
-            LEFT JOIN subjects s ON q.subject_id = s.id
-            WHERE date(q.created_at) >= ?
-              AND (s.id IS NULL OR s.gate_paper = ? OR s.gate_paper = 'SHARED' OR s.gate_paper = 'ALL')
-          `).get(monthStart, targetPaper) as any;
-          currentValue = result.count || 0;
-        }
+      if (goal.metric === 'study_hours') {
+        const result = db.prepare(`
+          SELECT COALESCE(SUM(ss.duration_seconds), 0) / 3600.0 as hours
+          FROM study_sessions ss
+          LEFT JOIN subjects s ON ss.subject_id = s.id
+          WHERE date(ss.start_time) >= ? AND ss.is_active = 0
+            AND (s.id IS NULL OR s.gate_paper = ? OR s.gate_paper = 'SHARED' OR s.gate_paper = 'ALL')
+        `).get(startDate, targetPaper) as any;
+        currentValue = result.hours || 0;
+      } else if (goal.metric === 'questions') {
+        const result = db.prepare(`
+          SELECT COUNT(*) as count FROM questions q
+          LEFT JOIN subjects s ON q.subject_id = s.id
+          WHERE date(q.created_at) >= ?
+            AND (s.id IS NULL OR s.gate_paper = ? OR s.gate_paper = 'SHARED' OR s.gate_paper = 'ALL')
+        `).get(startDate, targetPaper) as any;
+        currentValue = result.count || 0;
+      } else if (goal.metric === 'pyqs') {
+        const result = db.prepare(`
+          SELECT COUNT(*) as count FROM questions q
+          LEFT JOIN subjects s ON q.subject_id = s.id
+          WHERE date(q.created_at) >= ? AND q.is_pyq = 1
+            AND (s.id IS NULL OR s.gate_paper = ? OR s.gate_paper = 'SHARED' OR s.gate_paper = 'ALL')
+        `).get(startDate, targetPaper) as any;
+        currentValue = result.count || 0;
+      } else if (goal.metric === 'revisions') {
+        const result = db.prepare(`
+          SELECT COUNT(*) as count FROM revisions r
+          LEFT JOIN topics t ON r.topic_id = t.id
+          LEFT JOIN subjects s ON t.subject_id = s.id
+          WHERE date(r.revision_date) >= ?
+            AND (s.id IS NULL OR s.gate_paper = ? OR s.gate_paper = 'SHARED' OR s.gate_paper = 'ALL')
+        `).get(startDate, targetPaper) as any;
+        currentValue = result.count || 0;
+      } else if (goal.metric === 'mocks') {
+        const result = db.prepare(`
+          SELECT COUNT(*) as count FROM mock_tests
+          WHERE date >= ? AND (gate_paper = ? OR gate_paper = 'ALL')
+        `).get(startDate, targetPaper) as any;
+        currentValue = result.count || 0;
       }
       
       return { ...goal, current_value: Math.round(currentValue * 100) / 100 };
@@ -132,7 +115,7 @@ export function registerGoalHandlers(): void {
         'INSERT INTO phase_subjects (phase_id, subject_id, target_completion) VALUES (?, ?, ?)'
       );
       for (const s of data.subjects) {
-        insertSubject.run(phaseId, s.subject_id, s.target_completion || 100);
+        insertSubject.run(phaseId, s.subject_id || s.id, s.target_completion || 100);
       }
     }
     
@@ -146,12 +129,25 @@ export function registerGoalHandlers(): void {
     const phases = db.prepare(`SELECT * FROM phases ${where} ORDER BY start_date ASC`).all(...params) as any[];
     return phases.map(phase => {
       const subjects = db.prepare(`
-        SELECT ps.*, s.name as subject_name, s.color as subject_color
+        SELECT ps.*, s.name as subject_name, s.color as subject_color,
+          (SELECT COUNT(*) FROM topics WHERE subject_id = s.id) as total_topics,
+          (SELECT COUNT(*) FROM topics WHERE subject_id = s.id AND status IN ('completed', 'strong')) as completed_topics,
+          (SELECT COALESCE(SUM(duration_seconds), 0) FROM study_sessions WHERE subject_id = s.id AND is_active = 0) as study_seconds
         FROM phase_subjects ps
         LEFT JOIN subjects s ON ps.subject_id = s.id
         WHERE ps.phase_id = ?
-      `).all(phase.id);
-      return { ...phase, subjects };
+      `).all(phase.id) as any[];
+
+      const enrichedSubjects = subjects.map(s => {
+        const actual_completion = s.total_topics > 0 ? Math.round((s.completed_topics / s.total_topics) * 100) : 0;
+        return { ...s, actual_completion };
+      });
+
+      const overall_completion = enrichedSubjects.length > 0
+        ? Math.round(enrichedSubjects.reduce((acc, s) => acc + s.actual_completion, 0) / enrichedSubjects.length)
+        : 0;
+
+      return { ...phase, subjects: enrichedSubjects, overall_completion };
     });
   });
 
@@ -159,10 +155,12 @@ export function registerGoalHandlers(): void {
     const phase = db.prepare('SELECT * FROM phases WHERE id = ?').get(id);
     if (!phase) return null;
     const subjects = db.prepare(`
-      SELECT ps.*, s.name as subject_name, s.color as subject_color
+      SELECT ps.*, s.name as subject_name, s.color as subject_color,
+        (SELECT COUNT(*) FROM topics WHERE subject_id = s.id) as total_topics,
+        (SELECT COUNT(*) FROM topics WHERE subject_id = s.id AND status IN ('completed', 'strong')) as completed_topics
       FROM phase_subjects ps LEFT JOIN subjects s ON ps.subject_id = s.id
       WHERE ps.phase_id = ?
-    `).all(id);
+    `).all(id) as any[];
     return { ...(phase as any), subjects };
   });
 
