@@ -13,20 +13,27 @@ export function registerRevisionHandlers(): void {
     ).get(data.topic_id) as any;
     const revisionNumber = (existing?.count || 0) + 1;
     
-    // Calculate next revision date based on spaced repetition
-    const intervals = getRevisionIntervals();
-    const nextIntervalDays = intervals[Math.min(revisionNumber, intervals.length - 1)];
-    const nextDate = new Date();
-    nextDate.setDate(nextDate.getDate() + nextIntervalDays);
-    
-    // Adjust based on performance - poor performance = sooner revision
-    let adjustedNextDate = nextDate;
-    if (data.performance_rating && data.performance_rating <= 2) {
-      adjustedNextDate = new Date();
-      adjustedNextDate.setDate(adjustedNextDate.getDate() + 1); // Review again tomorrow
-    } else if (data.performance_rating === 3) {
-      adjustedNextDate = new Date();
-      adjustedNextDate.setDate(adjustedNextDate.getDate() + Math.ceil(nextIntervalDays / 2));
+    // Calculate next revision date: explicit date > interval_days > spaced repetition algorithm
+    let nextRevisionDateStr: string;
+    if (data.next_revision_date) {
+      nextRevisionDateStr = data.next_revision_date;
+    } else if (data.interval_days) {
+      const nextDate = new Date();
+      nextDate.setDate(nextDate.getDate() + data.interval_days);
+      nextRevisionDateStr = formatLocalDate(nextDate);
+    } else {
+      const intervals = getRevisionIntervals();
+      const nextIntervalDays = intervals[Math.min(revisionNumber, intervals.length - 1)];
+      const nextDate = new Date();
+      nextDate.setDate(nextDate.getDate() + nextIntervalDays);
+      
+      // Adjust based on performance - poor performance = sooner revision
+      if (data.performance_rating && data.performance_rating <= 2) {
+        nextDate.setDate(new Date().getDate() + 1); // Review again tomorrow
+      } else if (data.performance_rating === 3) {
+        nextDate.setDate(new Date().getDate() + Math.max(2, Math.ceil(nextIntervalDays / 2)));
+      }
+      nextRevisionDateStr = formatLocalDate(nextDate);
     }
     
     const result = db.prepare(`
@@ -36,17 +43,20 @@ export function registerRevisionHandlers(): void {
       data.topic_id, data.subtopic_id || null,
       data.revision_date || formatLocalDate(new Date()),
       data.performance_rating || null, data.confidence || null,
-      data.notes || null, formatLocalDate(adjustedNextDate),
+      data.notes || null, nextRevisionDateStr,
       revisionNumber
     );
     
-    // Update topic status
+    // Update topic status and confidence
     if (data.confidence && data.confidence >= 80) {
       db.prepare("UPDATE topics SET status = 'strong', confidence = ?, updated_at = datetime('now') WHERE id = ?")
         .run(data.confidence, data.topic_id);
     } else if (data.performance_rating && data.performance_rating <= 2) {
       db.prepare("UPDATE topics SET status = 'needs_revision', confidence = ?, updated_at = datetime('now') WHERE id = ?")
         .run(data.confidence || 0, data.topic_id);
+    } else if (data.confidence !== undefined) {
+      db.prepare("UPDATE topics SET confidence = ?, updated_at = datetime('now') WHERE id = ?")
+        .run(data.confidence, data.topic_id);
     }
     
     return db.prepare('SELECT * FROM revisions WHERE id = ?').get(result.lastInsertRowid);
