@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useState, useCallback, useEffect, useRef } from 'react';
-import { StudySession, Subject, Topic, Subtopic, ActivityType } from '../types';
+import { StudySession, ActivityType } from '../types';
 
 interface TimerState {
   isRunning: boolean;

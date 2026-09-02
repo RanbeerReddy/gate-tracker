@@ -30,10 +30,3 @@ export function log(message: string, error?: any): void {
     console.log(logLine);
   }
 }
-
-export function closeLogger(): void {
-  if (logStream) {
-    logStream.end();
-    logStream = null;
-  }
-}

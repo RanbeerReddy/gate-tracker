@@ -60,23 +60,6 @@ export function clearSupabaseSession(): void {
 // AUTHENTICATION & PROFILES
 // ==========================================
 
-export async function checkUsernameAvailable(username: string): Promise<boolean> {
-  try {
-    const sb = getSupabase();
-    const { data, error } = await sb
-      .from('profiles')
-      .select('id')
-      .ilike('username', username.trim())
-      .maybeSingle();
-
-    if (error) throw error;
-    return !data;
-  } catch (err) {
-    console.warn('Username check fallback:', err);
-    return true;
-  }
-}
-
 export async function fetchUserProfile(userId: string): Promise<UserProfile | null> {
   try {
     const sb = getSupabase();

@@ -1,7 +1,3 @@
-export interface SubtopicConfig {
-  name: string;
-}
-
 export interface TopicConfig {
   name: string;
   subtopics: string[];
