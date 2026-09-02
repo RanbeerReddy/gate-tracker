@@ -132,14 +132,39 @@ export default function Calendar() {
             <p className="page-subtitle">{Math.round(totalHours)}h total • {daysStudied} days studied in {year}</p>
           </div>
 
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-3 flex-wrap">
             <button className="btn btn-secondary btn-sm" onClick={() => setShowAddEvent(true)}>
               + Add Event
             </button>
-            <div className="flex items-center gap-2">
-              <button className="btn btn-ghost btn-sm" onClick={() => setYear(y => y - 1)}>←</button>
-              <span className="font-semibold">{year}</span>
-              <button className="btn btn-ghost btn-sm" onClick={() => setYear(y => y + 1)}>→</button>
+            <div className="flex items-center gap-1 bg-tertiary p-1 rounded" style={{ background: 'var(--bg-card)', border: '1px solid var(--border-primary)', borderRadius: 'var(--radius-md)' }}>
+              <button
+                className="btn btn-ghost btn-sm"
+                style={{ padding: '2px 8px' }}
+                onClick={() => setYear(y => y - 1)}
+                title="Previous Year"
+              >
+                ←
+              </button>
+
+              {[new Date().getFullYear() - 2, new Date().getFullYear() - 1, new Date().getFullYear(), new Date().getFullYear() + 1, new Date().getFullYear() + 2].map(y => (
+                <button
+                  key={y}
+                  className={`btn btn-sm ${year === y ? 'btn-primary' : 'btn-ghost'}`}
+                  style={{ padding: '2px 8px', fontSize: '11px', fontWeight: year === y ? 700 : 500 }}
+                  onClick={() => setYear(y)}
+                >
+                  {y}
+                </button>
+              ))}
+
+              <button
+                className="btn btn-ghost btn-sm"
+                style={{ padding: '2px 8px' }}
+                onClick={() => setYear(y => y + 1)}
+                title="Next Year"
+              >
+                →
+              </button>
             </div>
           </div>
         </div>
