@@ -122,6 +122,25 @@ export function registerAnalyticsHandlers(): void {
       LIMIT 5
     `).all(activePaper);
 
+    // Lifetime stats for active paper
+    const lifetimeStudy = db.prepare(`
+      SELECT COALESCE(SUM(ss.duration_seconds), 0) as total_seconds,
+        COUNT(DISTINCT date(ss.start_time)) as days_studied,
+        COUNT(*) as session_count
+      FROM study_sessions ss
+      LEFT JOIN subjects s ON ss.subject_id = s.id
+      WHERE ss.is_active = 0
+        AND (s.id IS NULL OR s.gate_paper = ? OR s.gate_paper = 'SHARED' OR s.gate_paper = 'ALL')
+    `).get(activePaper) as any;
+
+    const lifetimeQuestions = db.prepare(`
+      SELECT COUNT(*) as total,
+        COUNT(CASE WHEN q.is_correct = 1 THEN 1 END) as correct
+      FROM questions q
+      LEFT JOIN subjects s ON q.subject_id = s.id
+      WHERE (s.id IS NULL OR s.gate_paper = ? OR s.gate_paper = 'SHARED' OR s.gate_paper = 'ALL')
+    `).get(activePaper) as any;
+
     return {
       activePaper,
       today: {
@@ -140,6 +159,14 @@ export function registerAnalyticsHandlers(): void {
         questionsSolved: weekQuestions?.total || 0,
         questionsCorrect: weekQuestions?.correct || 0,
         accuracy: weekQuestions?.total > 0 ? Math.round(weekQuestions.correct / weekQuestions.total * 100) : 0,
+      },
+      lifetime: {
+        studySeconds: lifetimeStudy?.total_seconds || 0,
+        daysStudied: lifetimeStudy?.days_studied || 0,
+        sessions: lifetimeStudy?.session_count || 0,
+        questionsSolved: lifetimeQuestions?.total || 0,
+        questionsCorrect: lifetimeQuestions?.correct || 0,
+        accuracy: lifetimeQuestions?.total > 0 ? Math.round(lifetimeQuestions.correct / lifetimeQuestions.total * 100) : 0,
       },
       syllabus: syllabusStats || { total_topics: 0, completed: 0, learning: 0, needs_revision: 0, not_started: 0 },
       subjectCompletion: subjectCompletion || [],
@@ -404,8 +431,21 @@ export function registerAnalyticsHandlers(): void {
     return recommendations.slice(0, 8);
   });
 
-  ipcMain.handle('analytics:getHeatmap', (_e, year: number, paper?: string) => {
+  ipcMain.handle('analytics:getHeatmap', (_e, year?: number | string, paper?: string) => {
     const activePaper = getActiveGatePaper(db, paper);
+    if (!year || year === 'ALL' || year === 'all' || year === 0) {
+      return db.prepare(`
+        SELECT date(ss.start_time) as date,
+          SUM(ss.duration_seconds) / 3600.0 as hours,
+          COUNT(*) as sessions
+        FROM study_sessions ss
+        LEFT JOIN subjects s ON ss.subject_id = s.id
+        WHERE ss.is_active = 0
+          AND (s.id IS NULL OR s.gate_paper = ? OR s.gate_paper = 'SHARED' OR s.gate_paper = 'ALL')
+        GROUP BY date(ss.start_time)
+        ORDER BY date ASC
+      `).all(activePaper);
+    }
     return db.prepare(`
       SELECT date(ss.start_time) as date,
         SUM(ss.duration_seconds) / 3600.0 as hours,
