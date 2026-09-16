@@ -120,7 +120,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     getQuestionAnalytics: (range: any, paper?: string) => ipcRenderer.invoke('analytics:getQuestionAnalytics', range, paper),
     getWeakAreas: (paper?: string) => ipcRenderer.invoke('analytics:getWeakAreas', paper),
     getRecommendations: (paper?: string) => ipcRenderer.invoke('analytics:getRecommendations', paper),
-    getHeatmap: (year: number, paper?: string) => ipcRenderer.invoke('analytics:getHeatmap', year, paper),
+    getHeatmap: (year?: number | string, paper?: string) => ipcRenderer.invoke('analytics:getHeatmap', year, paper),
     getSubjectStats: (subjectId: number) => ipcRenderer.invoke('analytics:getSubjectStats', subjectId),
     getTopicStats: (topicId: number) => ipcRenderer.invoke('analytics:getTopicStats', topicId),
   },

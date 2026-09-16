@@ -36,7 +36,14 @@ export async function syncLocalProgressToCloud(userId: string, privacy: PrivacyS
         window.electronAPI.analytics.getHeatmap('ALL'),
       ]);
 
-      const lifetime = dashboard.lifetime || {};
+      const lifetime = dashboard.lifetime || {
+        studySeconds: 0,
+        daysStudied: 0,
+        sessions: 0,
+        questionsSolved: 0,
+        questionsCorrect: 0,
+        accuracy: 0,
+      };
       const totalHours = Math.round(((lifetime.studySeconds || dashboard.week?.studySeconds || 0) / 3600) * 10) / 10;
       
       const activeDaysList = (allHeatmap || []).filter((h: any) => h.hours > 0);

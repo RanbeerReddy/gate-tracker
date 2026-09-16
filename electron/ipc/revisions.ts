@@ -65,7 +65,7 @@ export function registerRevisionHandlers(): void {
   ipcMain.handle('revisions:getDue', (_e, paper?: string) => {
     const activePaper = getActiveGatePaper(db, paper);
     return db.prepare(`
-      SELECT r.*, t.name as topic_name, s.name as subject_name, s.color as subject_color,
+      SELECT r.*, t.name as topic_name, t.subject_id as subject_id, s.name as subject_name, s.color as subject_color,
         t.status as topic_status
       FROM revisions r
       LEFT JOIN topics t ON r.topic_id = t.id
@@ -131,7 +131,7 @@ export function registerRevisionHandlers(): void {
     const activePaper = getActiveGatePaper(db, paper);
     // Get the latest revision for each topic and show upcoming schedule
     return db.prepare(`
-      SELECT r.*, t.name as topic_name, s.name as subject_name, s.color as subject_color,
+      SELECT r.*, t.name as topic_name, t.subject_id as subject_id, s.name as subject_name, s.color as subject_color,
         t.status as topic_status, t.confidence as topic_confidence
       FROM revisions r
       INNER JOIN (

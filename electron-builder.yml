@@ -43,9 +43,21 @@ dmg:
       y: 220
       type: link
       path: /Applications
+linux:
+  target:
+    - target: deb
+      arch:
+        - x64
+    - target: AppImage
+      arch:
+        - x64
+  category: Education
+  synopsis: GATE CSE Preparation Tracker
+  description: A standalone desktop application for GATE CSE preparation lifecycle.
 asar: true
 asarUnpack:
   - "**/*.node"
   - "**/better-sqlite3/**"
 extraMetadata:
   main: dist-electron/main.js
+

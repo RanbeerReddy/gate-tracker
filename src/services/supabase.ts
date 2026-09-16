@@ -289,14 +289,18 @@ export async function togglePostLike(postId: string, currentlyLiked: boolean): P
     if (currentlyLiked) {
       // Remove like
       await sb.from('likes').delete().eq('post_id', postId).eq('user_id', userId);
-      await sb.rpc('decrement_post_likes', { post_id_param: postId }).catch(() => {
+      try {
+        await sb.rpc('decrement_post_likes', { post_id_param: postId });
+      } catch (_) {
         // Fallback update
-        sb.from('posts').update({ likes_count: sb.rpc('greatest', [0]) }).eq('id', postId);
-      });
+        await sb.from('posts').update({ likes_count: sb.rpc('greatest', [0]) }).eq('id', postId);
+      }
     } else {
       // Add like
       await sb.from('likes').insert({ post_id: postId, user_id: userId });
-      await sb.rpc('increment_post_likes', { post_id_param: postId }).catch(() => {});
+      try {
+        await sb.rpc('increment_post_likes', { post_id_param: postId });
+      } catch (_) {}
     }
     return true;
   } catch (err) {
@@ -433,6 +437,10 @@ function normalizeUserProfile(raw: any, privacyRaw?: any, progressRaw?: any): Us
       id: '',
       username: 'user',
       display_name: 'GATE Aspirant',
+      avatar_url: null,
+      bio: null,
+      target_gate_year: null,
+      target_score: null,
       gate_paper: 'CS',
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),

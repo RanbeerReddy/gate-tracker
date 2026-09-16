@@ -14,7 +14,8 @@
     "test": "node scripts/test-runner.mjs",
     "package": "npm run build && electron-builder --win --publish never",
     "package:mac": "npm run build && electron-builder --mac --publish never",
-    "package:all": "npm run build && electron-builder -mw --publish never",
+    "package:linux": "npm run build && electron-builder --linux --publish never",
+    "package:all": "npm run build && electron-builder -mwl --publish never",
     "postinstall": "electron-builder install-app-deps",
     "start": "electron ."
   },

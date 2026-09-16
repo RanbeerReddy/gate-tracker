@@ -180,6 +180,7 @@ export interface Revision {
   created_at: string;
   // Computed
   topic_name?: string;
+  subject_id?: number;
   subject_name?: string;
   subject_color?: string;
   topic_status?: string;
@@ -283,7 +284,7 @@ export interface CalendarEvent {
   color: string;
   event_type: 'exam' | 'mock_test' | 'revision_deadline' | 'phase_deadline' | 'custom';
   description: string | null;
-  is_exam: number;
+  is_exam: number | boolean;
   is_active: number;
   created_at: string;
 }
@@ -412,6 +413,14 @@ export interface DashboardData {
     questionsCorrect: number;
     accuracy: number;
   };
+  lifetime?: {
+    studySeconds: number;
+    daysStudied: number;
+    sessions: number;
+    questionsSolved: number;
+    questionsCorrect: number;
+    accuracy: number;
+  };
   syllabus: {
     total_topics: number;
     completed: number;
@@ -532,15 +541,15 @@ export interface ElectronAPI {
     getQuestionAnalytics: (range?: any, paper?: string) => Promise<any>;
     getWeakAreas: (paper?: string) => Promise<any[]>;
     getRecommendations: (paper?: string) => Promise<Recommendation[]>;
-    getHeatmap: (year: number, paper?: string) => Promise<any[]>;
+    getHeatmap: (year?: number | string, paper?: string) => Promise<any[]>;
     getSubjectStats: (subjectId: number) => Promise<any>;
     getTopicStats: (topicId: number) => Promise<any>;
   };
   events: {
     getAll: () => Promise<CalendarEvent[]>;
     getByDateRange: (range: { startDate: string; endDate: string }) => Promise<CalendarEvent[]>;
-    create: (data: Partial<CalendarEvent>) => Promise<CalendarEvent>;
-    update: (id: number, data: Partial<CalendarEvent>) => Promise<CalendarEvent>;
+    create: (data: Partial<CalendarEvent> | any) => Promise<CalendarEvent>;
+    update: (id: number, data: Partial<CalendarEvent> | any) => Promise<CalendarEvent>;
     delete: (id: number) => Promise<{ success: boolean }>;
     getExamInfo: (paper?: string) => Promise<ExamInfo>;
   };
