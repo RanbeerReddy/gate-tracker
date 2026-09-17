@@ -106,6 +106,7 @@ export function TimerProvider({ children }: { children: React.ReactNode }) {
           return {
             ...prev,
             totalPauseTime: prev.totalPauseTime + durationSeconds,
+            pauseStart: null,
           };
         });
       }
