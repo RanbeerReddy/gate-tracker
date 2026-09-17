@@ -4,13 +4,14 @@ import { PlannedSession, Subject, Topic, ACTIVITY_TYPES, ActivityType } from '..
 import { useToast } from '../contexts/ToastContext';
 import { useTimer } from '../contexts/TimerContext';
 import { formatLocalDate, parseLocalDate } from '../utils/dateUtils';
+import { formatIndiaDate, formatIndiaShortDateLabel, formatIndiaTime, getIndiaMinutesOfDay } from '../utils/indiaTime';
 
 export default function Planner() {
   const navigate = useNavigate();
   const { startSession } = useTimer();
   const { addToast } = useToast();
 
-  const [date, setDate] = useState(formatLocalDate(new Date()));
+  const [date, setDate] = useState(formatIndiaDate());
   const [planned, setPlanned] = useState<PlannedSession[]>([]);
   const [subjects, setSubjects] = useState<Subject[]>([]);
   const [topics, setTopics] = useState<Topic[]>([]);
@@ -157,7 +158,7 @@ export default function Planner() {
     setDate(formatLocalDate(d));
   };
 
-  const isToday = date === formatLocalDate(new Date());
+  const isToday = date === formatIndiaDate();
 
   // Time conversion helpers
   const timeToMinutes = (timeStr: string) => {
@@ -184,7 +185,7 @@ export default function Planner() {
   };
 
   // Current minute of the day for the live clock needle
-  const currentMinutesOfDay = currentTime.getHours() * 60 + currentTime.getMinutes() + currentTime.getSeconds() / 60;
+  const currentMinutesOfDay = getIndiaMinutesOfDay(currentTime);
   const currentClockAngle = (currentMinutesOfDay / (24 * 60)) * 360;
 
   // Check if currently active block exists
@@ -234,7 +235,7 @@ export default function Planner() {
             </div>
 
             {!isToday && (
-              <button className="btn btn-secondary btn-sm" onClick={() => setDate(formatLocalDate(new Date()))}>
+              <button className="btn btn-secondary btn-sm" onClick={() => setDate(formatIndiaDate())}>
                 Today
               </button>
             )}
@@ -264,7 +265,7 @@ export default function Planner() {
                 {isToday ? '🟢 LIVE TIME' : `PLAN FOR ${date}`}
               </span>
               <span className="text-xs text-secondary font-mono">
-                {currentTime.toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric', year: 'numeric' })}
+                {formatIndiaShortDateLabel(currentTime)}
               </span>
             </div>
 
@@ -279,7 +280,7 @@ export default function Planner() {
                 textShadow: '0 0 20px rgba(79, 125, 245, 0.4)',
               }}
             >
-              {currentTime.toLocaleTimeString('en-US', { hour12: true, hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+              {formatIndiaTime(currentTime)}
             </div>
 
             {/* Currently Active Block Banner */}

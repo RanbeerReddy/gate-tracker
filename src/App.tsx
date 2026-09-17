@@ -24,6 +24,7 @@ import Community from './pages/Community';
 import People from './pages/People';
 import Profile from './pages/Profile';
 import { createCommunityPost } from './services/supabase';
+import { formatIndiaDate } from './utils/indiaTime';
 
 export default function App() {
   const [isFirstRun, setIsFirstRun] = useState<boolean | null>(null);
@@ -156,7 +157,7 @@ export default function App() {
     // 3. Match today's planned sessions and mark matching block as completed
     if (savedSession?.id && timer.subjectId) {
       try {
-        const todayStr = new Date().toISOString().slice(0, 10);
+        const todayStr = formatIndiaDate();
         const plannedToday = await window.electronAPI.planner.getByDate(todayStr);
         const match = plannedToday?.find((p: any) => 
           !p.is_completed && p.subject_id === timer.subjectId && 

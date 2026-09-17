@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { DashboardData, Recommendation, ExamInfo, CommunityPost } from '../types';
 import { fetchCommunityPosts } from '../services/supabase';
 import { useNavigate } from 'react-router-dom';
+import { formatIndiaDateLabel } from '../utils/indiaTime';
 
 function formatHours(seconds: number): string {
   const h = seconds / 3600;
@@ -68,7 +69,7 @@ export default function Dashboard() {
               </span>
             </div>
             <p className="page-subtitle">
-              {new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })}
+              {formatIndiaDateLabel()}
               {settings.target_gate_year && ` • Target: GATE ${activePaper} ${settings.target_gate_year}`}
             </p>
           </div>
