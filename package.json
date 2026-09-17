@@ -3,7 +3,10 @@
   "version": "1.0.0",
   "description": "GATE CSE Preparation Tracker - Desktop Application",
   "main": "dist-electron/main.js",
-  "author": "GATE Tracker",
+  "author":  {
+    "name": "GATE Tracker",
+    "email": "reddyranbeer@gmail.com" 
+  },
   "license": "MIT",
   "private": true,
   "scripts": {
