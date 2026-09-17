@@ -409,24 +409,14 @@ export function runMigrations(): void {
     }
   }
 
-  // Ensure EC Syllabus is seeded into subjects/topics/subtopics
-  ensureECDataSeeded(db);
+  // Repair either paper if an older or interrupted install seeded only one.
+  ensureSyllabusDataSeeded(db);
 }
 
 import { GATE_PAPERS } from '../../src/config/gatePapers';
 
-export function ensureECDataSeeded(db: any): void {
+export function ensureSyllabusDataSeeded(db: any): void {
   try {
-    // Check if EC subjects exist
-    const ecSubjectsCount = db.prepare("SELECT COUNT(*) as count FROM subjects WHERE gate_paper = 'EC'").get() as any;
-    if (ecSubjectsCount && ecSubjectsCount.count > 0) {
-      return; // Already seeded
-    }
-
-    log('Seeding official GATE EC subjects and topics...');
-    const ecConfig = GATE_PAPERS.EC;
-    if (!ecConfig || !ecConfig.subjects) return;
-
     const insertSubject = db.prepare(
       'INSERT INTO subjects (name, color, display_order, gate_paper) VALUES (?, ?, ?, ?)'
     );
@@ -437,39 +427,47 @@ export function ensureECDataSeeded(db: any): void {
       'INSERT INTO subtopics (topic_id, name, display_order) VALUES (?, ?, ?)'
     );
 
-    const seedEC = db.transaction(() => {
-      // Find max display_order
-      const maxOrderRow = db.prepare('SELECT MAX(display_order) as max_order FROM subjects').get() as any;
-      let order = (maxOrderRow?.max_order || 0) + 1;
+    for (const paper of ['CS', 'EC'] as const) {
+      const subjectCount = db.prepare('SELECT COUNT(*) as count FROM subjects WHERE gate_paper = ?').get(paper) as any;
+      if (subjectCount?.count > 0) continue;
 
-      for (const subject of ecConfig.subjects) {
-        // Skip General Aptitude if already exists as SHARED
-        if (subject.name === 'General Aptitude') {
-          const ga = db.prepare("SELECT id FROM subjects WHERE name = 'General Aptitude'").get() as any;
-          if (ga) {
-            db.prepare("UPDATE subjects SET gate_paper = 'SHARED' WHERE id = ?").run(ga.id);
-            continue;
+      const config = GATE_PAPERS[paper];
+      if (!config?.subjects) continue;
+      log(`Seeding official GATE ${paper} subjects and topics...`);
+
+      db.transaction(() => {
+        const maxOrderRow = db.prepare('SELECT MAX(display_order) as max_order FROM subjects').get() as any;
+        let order = (maxOrderRow?.max_order || 0) + 1;
+
+        for (const subject of config.subjects) {
+          if (subject.name === 'General Aptitude') {
+            const ga = db.prepare("SELECT id FROM subjects WHERE name = 'General Aptitude'").get() as any;
+            if (ga) {
+              db.prepare("UPDATE subjects SET gate_paper = 'SHARED' WHERE id = ?").run(ga.id);
+              continue;
+            }
           }
-        }
 
-        const subResult = insertSubject.run(subject.name, subject.color, order++, 'EC');
-        const subjectId = subResult.lastInsertRowid as number;
-
-        subject.topics.forEach((topic, tIdx) => {
-          const topResult = insertTopic.run(subjectId, topic.name, tIdx);
-          const topicId = topResult.lastInsertRowid as number;
-
-          topic.subtopics.forEach((subtopic, stIdx) => {
-            insertSubtopic.run(topicId, subtopic, stIdx);
+          const paperTag = subject.name === 'General Aptitude' ? 'SHARED' : paper;
+          const subjectResult = insertSubject.run(subject.name, subject.color, order++, paperTag);
+          const subjectId = subjectResult.lastInsertRowid as number;
+          subject.topics.forEach((topic, topicIndex) => {
+            const topicResult = insertTopic.run(subjectId, topic.name, topicIndex);
+            const topicId = topicResult.lastInsertRowid as number;
+            topic.subtopics.forEach((subtopic, subtopicIndex) => {
+              insertSubtopic.run(topicId, subtopic, subtopicIndex);
+            });
           });
-        });
-      }
-    });
+        }
+      })();
 
-    seedEC();
-    log('GATE EC syllabus seeded successfully.');
+      log(`GATE ${paper} syllabus seeded successfully.`);
+    }
   } catch (err) {
-    log('Warning while checking/seeding EC syllabus:', err);
+    log('Failed to repair syllabus data', err);
+    throw err;
   }
 }
+
+export const ensureECDataSeeded = ensureSyllabusDataSeeded;
 
