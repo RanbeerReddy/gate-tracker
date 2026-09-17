@@ -2,10 +2,11 @@ import React, { useState, useEffect } from 'react';
 import { NavLink } from 'react-router-dom';
 import { useTimer } from '../../contexts/TimerContext';
 import { useAuth } from '../../contexts/AuthContext';
+import NavIcon from './NavIcon';
 
 interface NavItem {
   path: string;
-  icon: string;
+  icon: Parameters<typeof NavIcon>[0]['name'];
   label: string;
   badge?: number;
 }
@@ -39,34 +40,34 @@ export default function Sidebar({ revisionDueCount = 0 }: SidebarProps) {
     : `GATE ${activePaper}`;
 
   const mainNav: NavItem[] = [
-    { path: '/', icon: '📊', label: 'Dashboard' },
-    { path: '/study', icon: '⏱️', label: 'Study' },
-    { path: '/subjects', icon: '📚', label: 'Subjects' },
+    { path: '/', icon: 'dashboard', label: 'Dashboard' },
+    { path: '/study', icon: 'study', label: 'Study' },
+    { path: '/subjects', icon: 'subjects', label: 'Subjects' },
   ];
 
   const trackingNav: NavItem[] = [
-    { path: '/questions', icon: '❓', label: 'Questions' },
-    { path: '/mistakes', icon: '❌', label: 'Mistakes' },
-    { path: '/revision', icon: '🔄', label: 'Revision', badge: revisionDueCount > 0 ? revisionDueCount : undefined },
-    { path: '/pyqs', icon: '📝', label: 'PYQs' },
-    { path: '/mocks', icon: '📋', label: 'Mock Tests' },
+    { path: '/questions', icon: 'questions', label: 'Questions' },
+    { path: '/mistakes', icon: 'mistakes', label: 'Mistakes' },
+    { path: '/revision', icon: 'revision', label: 'Revision', badge: revisionDueCount > 0 ? revisionDueCount : undefined },
+    { path: '/pyqs', icon: 'pyqs', label: 'PYQs' },
+    { path: '/mocks', icon: 'mocks', label: 'Mock Tests' },
   ];
 
   const planningNav: NavItem[] = [
-    { path: '/planner', icon: '📅', label: 'Planner' },
-    { path: '/goals', icon: '🎯', label: 'Goals' },
-    { path: '/calendar', icon: '📆', label: 'Calendar' },
-    { path: '/analytics', icon: '📈', label: 'Analytics' },
+    { path: '/planner', icon: 'planner', label: 'Planner' },
+    { path: '/goals', icon: 'goals', label: 'Goals' },
+    { path: '/calendar', icon: 'calendar', label: 'Calendar' },
+    { path: '/analytics', icon: 'analytics', label: 'Analytics' },
   ];
 
   const socialNav: NavItem[] = [
-    { path: '/community', icon: '💬', label: 'Community' },
-    { path: '/people', icon: '👥', label: 'People' },
+    { path: '/community', icon: 'community', label: 'Community' },
+    { path: '/people', icon: 'people', label: 'People' },
   ];
 
   const systemNav: NavItem[] = [
-    { path: '/search', icon: '🔍', label: 'Search' },
-    { path: '/settings', icon: '⚙️', label: 'Settings' },
+    { path: '/search', icon: 'search', label: 'Search' },
+    { path: '/settings', icon: 'settings', label: 'Settings' },
   ];
 
   const renderSection = (label: string, items: NavItem[]) => (
@@ -79,7 +80,7 @@ export default function Sidebar({ revisionDueCount = 0 }: SidebarProps) {
           className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}
           end={item.path === '/'}
         >
-          <span className="nav-item-icon">{item.icon}</span>
+          <NavIcon name={item.icon} />
           <span>{item.label}</span>
           {item.badge && <span className="nav-item-badge">{item.badge}</span>}
         </NavLink>
@@ -126,7 +127,7 @@ export default function Sidebar({ revisionDueCount = 0 }: SidebarProps) {
               flexShrink: 0,
             }}
           >
-            {mode === 'authenticated' ? userInitial : '👤'}
+            {mode === 'authenticated' ? userInitial : <NavIcon name="user" />}
           </div>
           <div className="truncate" style={{ flex: 1, fontSize: 'var(--text-xs)' }}>
             <div className="font-semibold text-primary truncate">

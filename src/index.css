@@ -259,8 +259,8 @@ a:hover {
 }
 
 .nav-item-icon {
-  font-size: var(--text-lg);
   width: 20px;
+  height: 20px;
   text-align: center;
   flex-shrink: 0;
 }

@@ -22,7 +22,7 @@ function createWindow(): void {
     minWidth: 1024,
     minHeight: 700,
     title: 'GATE Tracker',
-    icon: path.join(__dirname, '../resources/icon.ico'),
+    icon: path.join(__dirname, '../resources/icon.svg'),
     backgroundColor: '#0f1117',
     autoHideMenuBar: true,
     show: false,

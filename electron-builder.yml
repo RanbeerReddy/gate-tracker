@@ -3,6 +3,7 @@ productName: GATE Tracker
 directories:
   output: release
   buildResources: resources
+icon: resources/icon.svg
 files:
   - dist/**/*
   - dist-electron/**/*
