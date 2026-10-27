@@ -22,6 +22,44 @@ const SUPABASE_ANON_KEY =
   (import.meta as any).env?.VITE_SUPABASE_ANON_KEY ||
   '';
 
+/**
+ * Custom storage adapter that writes to both localStorage (for Supabase in-process use)
+ * AND persists to SQLite via electronAPI (survives PC reboots, OS credential wipes, etc.)
+ *
+ * On read, it tries localStorage first (fast path), then falls back to SQLite.
+ * This is the key fix for sessions being lost on Windows/Linux reboots.
+ */
+class PersistentAuthStorage {
+  getItem(key: string): string | null {
+    try {
+      const val = localStorage.getItem(key);
+      if (val) return val;
+    } catch (_) {}
+    // Sync fallback from SQLite isn't possible here (getItem must be sync
+    // per Supabase interface). The async restore is handled in AuthContext init.
+    return null;
+  }
+
+  setItem(key: string, value: string): void {
+    try {
+      localStorage.setItem(key, value);
+    } catch (_) {}
+    // Also persist to SQLite for reboot resilience
+    if (window.electronAPI?.settings) {
+      window.electronAPI.settings.set(`auth_storage:${key}`, value).catch(() => {});
+    }
+  }
+
+  removeItem(key: string): void {
+    try {
+      localStorage.removeItem(key);
+    } catch (_) {}
+    if (window.electronAPI?.settings) {
+      window.electronAPI.settings.set(`auth_storage:${key}`, '').catch(() => {});
+    }
+  }
+}
+
 let supabaseClient: SupabaseClient | null = null;
 
 export function getSupabase(): SupabaseClient {
@@ -31,7 +69,7 @@ export function getSupabase(): SupabaseClient {
         persistSession: true,
         autoRefreshToken: true,
         detectSessionInUrl: false,
-        storage: window.localStorage,
+        storage: new PersistentAuthStorage(),
       },
     });
   }
@@ -39,11 +77,148 @@ export function getSupabase(): SupabaseClient {
 }
 
 /**
- * Clears all Supabase auth tokens from localStorage and resets the client instance.
+ * Get the OAuth redirect URL for the custom protocol deep link.
+ * This is the URL Supabase redirects to after the user authenticates in the browser.
+ */
+export function getOAuthRedirectUrl(): string {
+  return 'gatetracker://auth/callback';
+}
+
+/**
+ * Initiate OAuth sign-in via the system browser.
+ * Opens the Supabase OAuth URL in the default browser; the callback
+ * deep link (gatetracker://auth/callback) is handled by Electron.
+ */
+export async function signInWithOAuth(provider: 'google' | 'github'): Promise<{ error?: string }> {
+  try {
+    const sb = getSupabase();
+    const { data, error } = await sb.auth.signInWithOAuth({
+      provider,
+      options: {
+        redirectTo: getOAuthRedirectUrl(),
+        skipBrowserRedirect: true, // We handle the redirect ourselves
+      },
+    });
+
+    if (error) return { error: error.message };
+    if (data?.url) {
+      // Open the auth URL in the system default browser
+      if (window.electronAPI?.auth?.openExternal) {
+        await window.electronAPI.auth.openExternal(data.url);
+      } else {
+        window.open(data.url, '_blank');
+      }
+    }
+    return {};
+  } catch (err: any) {
+    return { error: err.message || 'OAuth sign-in failed' };
+  }
+}
+
+/**
+ * Set a session from OAuth deep link tokens.
+ * Called when the main process forwards tokens from the gatetracker:// callback.
+ */
+export async function setSessionFromTokens(
+  accessToken: string,
+  refreshToken: string
+): Promise<{ error?: string }> {
+  try {
+    const sb = getSupabase();
+    const { error } = await sb.auth.setSession({
+      access_token: accessToken,
+      refresh_token: refreshToken,
+    });
+    if (error) return { error: error.message };
+    return {};
+  } catch (err: any) {
+    return { error: err.message || 'Failed to set session from tokens' };
+  }
+}
+
+/**
+ * Restore Supabase session from SQLite backup.
+ * This is called during app init when localStorage was wiped (e.g. after PC reboot).
+ * Returns true if a session was successfully restored.
+ */
+export async function restoreSessionFromSQLite(): Promise<boolean> {
+  if (!window.electronAPI?.settings) return false;
+
+  try {
+    const sb = getSupabase();
+
+    // First try the new per-key storage format
+    const storageKey = Object.keys(localStorage).find(
+      k => k.startsWith('sb-') && k.endsWith('-auth-token')
+    );
+
+    // If localStorage already has a valid session, no need to restore
+    if (storageKey) {
+      const existing = localStorage.getItem(storageKey);
+      if (existing) {
+        try {
+          const parsed = JSON.parse(existing);
+          if (parsed?.access_token) return false; // Already have a session
+        } catch (_) {}
+      }
+    }
+
+    // Try to restore from SQLite (new auth_storage:* keys first)
+    const allSettings = await window.electronAPI.settings.getAll();
+    let restored = false;
+
+    for (const [key, value] of Object.entries(allSettings)) {
+      if (key.startsWith('auth_storage:sb-') && key.includes('-auth-token') && value) {
+        const originalKey = key.replace('auth_storage:', '');
+        try {
+          const parsed = JSON.parse(value);
+          if (parsed?.access_token && parsed?.refresh_token) {
+            const { data, error } = await sb.auth.setSession({
+              access_token: parsed.access_token,
+              refresh_token: parsed.refresh_token,
+            });
+            if (!error && data.session) {
+              restored = true;
+              break;
+            }
+          }
+        } catch (_) {}
+      }
+    }
+
+    // Legacy fallback: try the old supabase_session key
+    if (!restored) {
+      const legacySession = await window.electronAPI.settings.get('supabase_session');
+      if (legacySession) {
+        try {
+          const parsed = JSON.parse(legacySession);
+          if (parsed?.access_token && parsed?.refresh_token) {
+            const { data, error } = await sb.auth.setSession({
+              access_token: parsed.access_token,
+              refresh_token: parsed.refresh_token,
+            });
+            if (!error && data.session) {
+              restored = true;
+            }
+          }
+        } catch (_) {}
+      }
+    }
+
+    return restored;
+  } catch (err) {
+    console.warn('Session restore from SQLite failed:', err);
+    return false;
+  }
+}
+
+/**
+ * Clears all Supabase auth tokens from localStorage and SQLite, and resets the client instance.
  * Used on first launch to prevent inheriting a bundled auth session from the build machine,
  * and after sign-out to ensure a completely clean state.
  */
 export function clearSupabaseSession(): void {
+  // Clear localStorage tokens
   try {
     const keysToRemove = Object.keys(localStorage).filter(
       k => k.startsWith('sb-') && (k.endsWith('-auth-token') || k.includes('supabase'))
@@ -52,6 +227,20 @@ export function clearSupabaseSession(): void {
   } catch (_) {
     // localStorage may be unavailable
   }
+
+  // Clear SQLite-backed auth storage
+  if (window.electronAPI?.settings) {
+    window.electronAPI.settings.getAll().then(allSettings => {
+      for (const key of Object.keys(allSettings)) {
+        if (key.startsWith('auth_storage:')) {
+          window.electronAPI.settings.set(key, '').catch(() => {});
+        }
+      }
+    }).catch(() => {});
+    // Also clear legacy key
+    window.electronAPI.settings.set('supabase_session', '').catch(() => {});
+  }
+
   // Reset the client so it doesn't hold a stale session in memory
   supabaseClient = null;
 }

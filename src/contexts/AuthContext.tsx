@@ -1,6 +1,15 @@
-import React, { createContext, useContext, useState, useEffect, useCallback, ReactNode } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback, useRef, ReactNode } from 'react';
 import { User } from '@supabase/supabase-js';
-import { getSupabase, fetchUserProfile, updateUserProfile, updatePrivacySettings, clearSupabaseSession } from '../services/supabase';
+import {
+  getSupabase,
+  fetchUserProfile,
+  updateUserProfile,
+  updatePrivacySettings,
+  clearSupabaseSession,
+  restoreSessionFromSQLite,
+  setSessionFromTokens,
+  signInWithOAuth as supabaseSignInWithOAuth,
+} from '../services/supabase';
 import { syncLocalProgressToCloud } from '../services/syncProgress';
 import { UserProfile, PrivacySettings } from '../types';
 
@@ -13,6 +22,7 @@ interface AuthContextType {
   isLoading: boolean;
   signIn: (email: string, password: string) => Promise<{ error?: string }>;
   signUp: (email: string, password: string, username: string, displayName: string, targetYear?: number) => Promise<{ error?: string }>;
+  signInWithOAuth: (provider: 'google' | 'github') => Promise<{ error?: string }>;
   signOut: () => Promise<void>;
   updateProfile: (data: Partial<UserProfile>) => Promise<boolean>;
   updatePrivacy: (settings: Partial<PrivacySettings>) => Promise<boolean>;
@@ -41,6 +51,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [isOnline, setIsOnline] = useState<boolean>(navigator.onLine);
   const [isLoading, setIsLoading] = useState<boolean>(true);
 
+  // Refs to avoid stale closures in callbacks and listeners
+  const userRef = useRef<User | null>(null);
+  const privacyRef = useRef<PrivacySettings>(DEFAULT_PRIVACY);
+  const loadingRef = useRef<boolean>(true);
+
+  // Keep refs in sync with state
+  useEffect(() => { userRef.current = user; }, [user]);
+  useEffect(() => { privacyRef.current = privacySettings; }, [privacySettings]);
+  useEffect(() => { loadingRef.current = isLoading; }, [isLoading]);
+
   // Monitor online / offline network state
   useEffect(() => {
     const handleOnline = () => setIsOnline(true);
@@ -59,11 +79,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
    */
   const savePrivacyLocally = useCallback(async (settings: PrivacySettings, targetUserId?: string) => {
     try {
-      await window.electronAPI.privacy.set(settings, targetUserId || user?.id || 'local');
+      const userId = targetUserId || userRef.current?.id || 'local';
+      await window.electronAPI.privacy.set(settings, userId);
     } catch (err) {
       console.warn('Failed to save privacy settings locally:', err);
     }
-  }, [user]);
+  }, []);
 
   /**
    * Load privacy settings from local SQLite cache.
@@ -71,7 +92,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
    */
   const loadPrivacyLocally = useCallback(async (targetUserId?: string): Promise<PrivacySettings | null> => {
     try {
-      const local = await window.electronAPI.privacy.get(targetUserId || user?.id || 'local');
+      const userId = targetUserId || userRef.current?.id || 'local';
+      const local = await window.electronAPI.privacy.get(userId);
       if (local) {
         return { ...DEFAULT_PRIVACY, ...local };
       }
@@ -79,84 +101,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       console.warn('Failed to load local privacy settings:', err);
     }
     return null;
-  }, [user]);
-
-  // Initialize session and listen for auth state changes
-  useEffect(() => {
-    const initAuth = async () => {
-      // Load local privacy settings immediately (no network needed)
-      const localPrivacy = await loadPrivacyLocally();
-      if (localPrivacy) {
-        setPrivacySettings(localPrivacy);
-      }
-
-      const sb = getSupabase();
-
-      try {
-        let { data: { session } } = await sb.auth.getSession();
-
-        // Restore session from SQLite backup if localStorage was cleared on PC reboot
-        if (!session && window.electronAPI?.settings) {
-          try {
-            const savedSessionStr = await window.electronAPI.settings.get('supabase_session');
-            if (savedSessionStr) {
-              const parsed = JSON.parse(savedSessionStr);
-              if (parsed?.access_token && parsed?.refresh_token) {
-                const { data, error } = await sb.auth.setSession({
-                  access_token: parsed.access_token,
-                  refresh_token: parsed.refresh_token,
-                });
-                if (!error && data.session) {
-                  session = data.session;
-                }
-              }
-            }
-          } catch (err) {
-            console.warn('SQLite session restore fallback:', err);
-          }
-        }
-
-        if (session?.user) {
-          setUser(session.user);
-          if (window.electronAPI?.settings) {
-            window.electronAPI.settings.set('supabase_session', JSON.stringify(session)).catch(() => {});
-          }
-          await loadUserData(session.user.id, session.user);
-          // Sync local study metrics to cloud on app launch so data is always up to date
-          syncLocalProgressToCloud(session.user.id, localPrivacy || privacySettings).catch(() => {});
-        } else {
-          setIsLoading(false);
-        }
-      } catch (err) {
-        console.warn('Auth session check fallback (Local Mode):', err);
-        setIsLoading(false);
-      }
-
-      const { data: { subscription } } = sb.auth.onAuthStateChange(async (_event, session) => {
-        if (session?.user) {
-          setUser(session.user);
-          if (window.electronAPI?.settings) {
-            window.electronAPI.settings.set('supabase_session', JSON.stringify(session)).catch(() => {});
-          }
-          await loadUserData(session.user.id, session.user);
-          syncLocalProgressToCloud(session.user.id, privacySettings).catch(() => {});
-        } else {
-          setUser(null);
-          setProfile(null);
-          setPrivacySettings(DEFAULT_PRIVACY);
-          setIsLoading(false);
-        }
-      });
-
-      return () => {
-        subscription.unsubscribe();
-      };
-    };
-
-    initAuth();
   }, []);
 
-  const loadUserData = async (userId: string, authUser?: User | null) => {
+  const loadUserData = useCallback(async (userId: string, authUser?: User | null) => {
     const MAX_RETRIES = 3;
     let lastError: any = null;
 
@@ -169,7 +116,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             const mergedPrivacy = { ...DEFAULT_PRIVACY, ...p.privacy };
             setPrivacySettings(mergedPrivacy);
             // Persist cloud privacy settings locally for offline access
-            savePrivacyLocally(mergedPrivacy);
+            savePrivacyLocally(mergedPrivacy, userId);
           }
           setIsLoading(false);
           return; // Success — exit early
@@ -187,14 +134,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     // All retries exhausted — build a fallback profile from user_metadata
     console.warn('All profile load retries failed, using user_metadata fallback:', lastError);
-    const resolvedUser = authUser || user;
+    const resolvedUser = authUser || userRef.current;
     const meta = resolvedUser?.user_metadata;
     if (meta) {
       setProfile({
         id: userId,
         username: meta.username || resolvedUser?.email?.split('@')[0] || 'user',
-        display_name: meta.display_name || meta.username || resolvedUser?.email?.split('@')[0] || 'GATE Aspirant',
-        avatar_url: meta.avatar_url || null,
+        display_name: meta.display_name || meta.full_name || meta.username || resolvedUser?.email?.split('@')[0] || 'GATE Aspirant',
+        avatar_url: meta.avatar_url || meta.picture || null,
         bio: null,
         target_gate_year: meta.target_gate_year || null,
         target_score: null,
@@ -204,7 +151,94 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
     // Even if cloud failed, local privacy settings were already loaded in initAuth
     setIsLoading(false);
-  };
+  }, [savePrivacyLocally]);
+
+  // Initialize session and listen for auth state changes
+  useEffect(() => {
+    let unsubscribe: (() => void) | null = null;
+    let cleanupDeepLink: (() => void) | null = null;
+
+    const initAuth = async () => {
+      // Load local privacy settings immediately (no network needed)
+      const localPrivacy = await loadPrivacyLocally('local');
+      if (localPrivacy) {
+        setPrivacySettings(localPrivacy);
+      }
+
+      const sb = getSupabase();
+
+      try {
+        let { data: { session } } = await sb.auth.getSession();
+
+        // Restore session from SQLite backup if localStorage was cleared on PC reboot
+        if (!session) {
+          const restored = await restoreSessionFromSQLite();
+          if (restored) {
+            const { data: { session: restoredSession } } = await sb.auth.getSession();
+            session = restoredSession;
+          }
+        }
+
+        if (session?.user) {
+          setUser(session.user);
+          const userPrivacy = await loadPrivacyLocally(session.user.id);
+          if (userPrivacy) {
+            setPrivacySettings(userPrivacy);
+          }
+          await loadUserData(session.user.id, session.user);
+          // Sync local study metrics to cloud on app launch so data is always up to date
+          syncLocalProgressToCloud(session.user.id, userPrivacy || privacyRef.current).catch(() => {});
+        } else {
+          setIsLoading(false);
+        }
+      } catch (err) {
+        console.warn('Auth session check fallback (Local Mode):', err);
+        setIsLoading(false);
+      }
+
+      // Listen for auth state changes (token refresh, sign in from deep link, etc.)
+      const { data: { subscription } } = sb.auth.onAuthStateChange(async (event, session) => {
+        console.log(`Auth state change: ${event}`);
+
+        if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') {
+          if (session?.user) {
+            setUser(session.user);
+            // Only reload full user data on actual sign-in, not token refresh
+            if (event === 'SIGNED_IN') {
+              await loadUserData(session.user.id, session.user);
+              syncLocalProgressToCloud(session.user.id, privacyRef.current).catch(() => {});
+            }
+          }
+        } else if (event === 'SIGNED_OUT') {
+          setUser(null);
+          setProfile(null);
+          setPrivacySettings(DEFAULT_PRIVACY);
+          setIsLoading(false);
+        }
+      });
+
+      unsubscribe = () => subscription.unsubscribe();
+
+      // Listen for OAuth deep link callbacks from the main process
+      if (window.electronAPI?.auth?.onDeepLink) {
+        cleanupDeepLink = window.electronAPI.auth.onDeepLink(async (tokens) => {
+          console.log('Received auth deep link callback');
+          const result = await setSessionFromTokens(tokens.access_token, tokens.refresh_token);
+          if (result.error) {
+            console.error('Failed to set session from deep link:', result.error);
+          }
+          // The onAuthStateChange listener above will handle the rest
+        });
+      }
+    };
+
+    initAuth();
+
+    return () => {
+      if (unsubscribe) unsubscribe();
+      if (cleanupDeepLink) cleanupDeepLink();
+    };
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const signIn = async (email: string, password: string): Promise<{ error?: string }> => {
     try {
@@ -216,11 +250,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (error) return { error: error.message };
       if (data.user) {
         setUser(data.user);
-        if (data.session && window.electronAPI?.settings) {
-          window.electronAPI.settings.set('supabase_session', JSON.stringify(data.session)).catch(() => {});
-        }
         await loadUserData(data.user.id, data.user);
-        syncLocalProgressToCloud(data.user.id, privacySettings).catch(() => {});
+        syncLocalProgressToCloud(data.user.id, privacyRef.current).catch(() => {});
       }
       return {};
     } catch (err: any) {
@@ -262,9 +293,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
       if (data.user) {
         setUser(data.user);
-        if (data.session && window.electronAPI?.settings) {
-          window.electronAPI.settings.set('supabase_session', JSON.stringify(data.session)).catch(() => {});
-        }
         // Initialize cloud privacy with active defaults so progress and calendar are visible
         try {
           await updatePrivacySettings(data.user.id, {
@@ -289,16 +317,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   };
 
+  const signInWithOAuth = async (provider: 'google' | 'github'): Promise<{ error?: string }> => {
+    return supabaseSignInWithOAuth(provider);
+  };
+
   const signOut = async () => {
     // Always clear state first so the UI updates immediately
     setUser(null);
     setProfile(null);
     setPrivacySettings(DEFAULT_PRIVACY);
-
-    // Clear SQLite session backup
-    if (window.electronAPI?.settings) {
-      window.electronAPI.settings.set('supabase_session', '').catch(() => {});
-    }
 
     // Restore unauthenticated local privacy settings
     try {
@@ -320,8 +347,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   const handleUpdateProfile = async (data: Partial<UserProfile>): Promise<boolean> => {
-    if (!user) return false;
-    const ok = await updateUserProfile(user.id, data);
+    const currentUser = userRef.current;
+    if (!currentUser) return false;
+    const ok = await updateUserProfile(currentUser.id, data);
     if (ok) {
       setProfile(prev => prev ? { ...prev, ...data } : null);
     }
@@ -329,32 +357,35 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   const handleUpdatePrivacy = async (settings: Partial<PrivacySettings>): Promise<boolean> => {
-    if (!user) return false;
-    const merged = { ...privacySettings, ...settings };
+    const currentUser = userRef.current;
+    if (!currentUser) return false;
+    const merged = { ...privacyRef.current, ...settings };
 
     // Save locally FIRST for instant persistence
-    savePrivacyLocally(merged);
+    savePrivacyLocally(merged, currentUser.id);
     setPrivacySettings(merged);
 
     // Then sync to cloud
-    const ok = await updatePrivacySettings(user.id, settings);
+    const ok = await updatePrivacySettings(currentUser.id, settings);
     if (ok) {
       // Trigger cloud progress sync with new privacy settings
-      syncLocalProgressToCloud(user.id, merged).catch(() => {});
+      syncLocalProgressToCloud(currentUser.id, merged).catch(() => {});
     }
     return ok;
   };
 
   const handleRefreshProfile = useCallback(async () => {
-    if (!user) return;
-    await loadUserData(user.id, user);
-  }, [user]);
+    const currentUser = userRef.current;
+    if (!currentUser) return;
+    await loadUserData(currentUser.id, currentUser);
+  }, [loadUserData]);
 
   const handleSyncProgress = async () => {
-    if (!user) return;
-    await syncLocalProgressToCloud(user.id, privacySettings);
+    const currentUser = userRef.current;
+    if (!currentUser) return;
+    await syncLocalProgressToCloud(currentUser.id, privacyRef.current);
     // Re-fetch profile data from cloud to display the actual synced values
-    await loadUserData(user.id, user);
+    await loadUserData(currentUser.id, currentUser);
   };
 
   return (
@@ -368,6 +399,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         isLoading,
         signIn,
         signUp,
+        signInWithOAuth,
         signOut,
         updateProfile: handleUpdateProfile,
         updatePrivacy: handleUpdatePrivacy,
