@@ -1,14 +1,10 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import { useTimer } from '../contexts/TimerContext';
 import { useToast } from '../contexts/ToastContext';
 import { Subject, Topic, Subtopic, ACTIVITY_TYPES, ActivityType, StudySession } from '../types';
+import { formatDuration } from '../utils/formatUtils';
 
-function formatDuration(seconds: number): string {
-  const h = Math.floor(seconds / 3600);
-  const m = Math.floor((seconds % 3600) / 60);
-  if (h === 0) return `${m}m`;
-  return `${h}h ${m}m`;
-}
+
 
 export default function Study() {
   const { timer, startSession, pauseSession, resumeSession, finishSession, formatTime } = useTimer();
@@ -21,7 +17,6 @@ export default function Study() {
   const [selectedSubtopic, setSelectedSubtopic] = useState<number | null>(null);
   const [selectedActivity, setSelectedActivity] = useState<ActivityType>('learning');
   const [sessions, setSessions] = useState<StudySession[]>([]);
-  const [showHistory, setShowHistory] = useState(false);
 
   useEffect(() => {
     loadSubjects();

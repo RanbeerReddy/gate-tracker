@@ -1,13 +1,11 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import { DashboardData, Recommendation, ExamInfo, CommunityPost } from '../types';
 import { fetchCommunityPosts } from '../services/supabase';
 import { useNavigate } from 'react-router-dom';
 import { formatIndiaDateLabel } from '../utils/indiaTime';
+import { formatHours } from '../utils/formatUtils';
 
-function formatHours(seconds: number): string {
-  const h = seconds / 3600;
-  return h < 1 ? `${Math.round(h * 60)}m` : `${h.toFixed(1)}h`;
-}
+
 
 export default function Dashboard() {
   const [data, setData] = useState<DashboardData | null>(null);

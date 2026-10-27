@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import { Routes, Route } from 'react-router-dom';
 import Sidebar from './components/layout/Sidebar';
 import { useTimer } from './contexts/TimerContext';
@@ -247,7 +247,7 @@ export default function App() {
             ) : (
               <button className="btn btn-secondary btn-sm" onClick={pauseSession}>⏸ Pause</button>
             )}
-            <button className="btn btn-primary btn-sm" onClick={() => setShowFinishModal(true)}>
+            <button className="btn btn-primary btn-sm" onClick={handleOpenFinishModal}>
               ⏹ Finish
             </button>
           </div>
