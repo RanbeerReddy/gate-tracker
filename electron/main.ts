@@ -9,8 +9,91 @@ import { getAppDataPath } from './utils/paths';
 
 let mainWindow: BrowserWindow | null = null;
 let suspendTimestamp: number | null = null;
+let pendingDeepLinkUrl: string | null = null;
 
 const VITE_DEV_SERVER_URL = process.env.VITE_DEV_SERVER_URL;
+const PROTOCOL = 'gatetracker';
+
+// Register the custom protocol for OAuth deep links (must be before app.ready)
+if (process.defaultApp) {
+  // Dev mode: register with full path
+  if (process.argv.length >= 2) {
+    app.setAsDefaultProtocolClient(PROTOCOL, process.execPath, [path.resolve(process.argv[1])]);
+  }
+} else {
+  app.setAsDefaultProtocolClient(PROTOCOL);
+}
+
+// Single instance lock — ensures deep link opens the existing window
+const gotTheLock = app.requestSingleInstanceLock();
+if (!gotTheLock) {
+  app.quit();
+} else {
+  app.on('second-instance', (_event, argv) => {
+    // On Windows/Linux the deep link URL is in argv
+    const deepLinkUrl = argv.find(arg => arg.startsWith(`${PROTOCOL}://`));
+    if (deepLinkUrl) {
+      handleDeepLink(deepLinkUrl);
+    }
+    // Focus the existing window
+    if (mainWindow) {
+      if (mainWindow.isMinimized()) mainWindow.restore();
+      mainWindow.focus();
+    }
+  });
+}
+
+// macOS: handle protocol URL via open-url event
+app.on('open-url', (event, url) => {
+  event.preventDefault();
+  handleDeepLink(url);
+});
+
+/**
+ * Parse a deep link URL and forward auth tokens to the renderer.
+ * Expected format: gatetracker://auth/callback#access_token=...&refresh_token=...
+ * or: gatetracker://auth/callback?access_token=...&refresh_token=...
+ */
+function handleDeepLink(url: string): void {
+  log(`Deep link received: ${url.substring(0, 80)}...`);
+
+  try {
+    // Extract fragment or query — Supabase puts tokens in the fragment (#)
+    let paramString = '';
+    const hashIndex = url.indexOf('#');
+    if (hashIndex !== -1) {
+      paramString = url.substring(hashIndex + 1);
+    } else {
+      const qIndex = url.indexOf('?');
+      if (qIndex !== -1) {
+        paramString = url.substring(qIndex + 1);
+      }
+    }
+
+    if (!paramString) {
+      log('Deep link had no parameters, ignoring.');
+      return;
+    }
+
+    const params = new URLSearchParams(paramString);
+    const accessToken = params.get('access_token');
+    const refreshToken = params.get('refresh_token');
+
+    if (accessToken && refreshToken) {
+      const payload = { access_token: accessToken, refresh_token: refreshToken };
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send('auth:deep-link', payload);
+      } else {
+        // Window not ready yet — store for later delivery
+        pendingDeepLinkUrl = url;
+      }
+    } else {
+      log('Deep link did not contain valid auth tokens.');
+    }
+  } catch (err) {
+    log('Failed to parse deep link URL', err);
+  }
+}
 
 function createWindow(): void {
   // Remove default application menu
@@ -39,6 +122,11 @@ function createWindow(): void {
   // Show when ready to avoid flash
   mainWindow.once('ready-to-show', () => {
     mainWindow?.show();
+    // Deliver any pending deep link that arrived before window was ready
+    if (pendingDeepLinkUrl) {
+      handleDeepLink(pendingDeepLinkUrl);
+      pendingDeepLinkUrl = null;
+    }
   });
 
   // Prevent external navigation and safely open verified http(s) links in default browser
@@ -111,6 +199,11 @@ function createWindow(): void {
     mainWindow = null;
   });
 }
+
+// IPC: Open auth URL in default browser (for OAuth flows)
+ipcMain.handle('auth:open-external', (_e, url: string) => {
+  shell.openExternal(url);
+});
 
 app.whenReady().then(async () => {
   try {

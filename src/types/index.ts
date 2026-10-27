@@ -577,6 +577,10 @@ export interface ElectronAPI {
     get: (userId?: string) => Promise<Omit<PrivacySettings, 'user_id' | 'updated_at'> | null>;
     set: (settings: Partial<PrivacySettings>, userId?: string) => Promise<void>;
   };
+  auth: {
+    openExternal: (url: string) => Promise<void>;
+    onDeepLink: (callback: (tokens: { access_token: string; refresh_token: string }) => void) => () => void;
+  };
   power: {
     onSuspend: (callback: () => void) => () => void;
     onResume: (callback: (durationSeconds: number) => void) => () => void;

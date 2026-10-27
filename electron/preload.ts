@@ -183,10 +183,19 @@ contextBridge.exposeInMainWorld('electronAPI', {
     },
   },
 
+  // Auth: open external URL for OAuth login
+  auth: {
+    openExternal: (url: string) => ipcRenderer.invoke('auth:open-external', url),
+    onDeepLink: (callback: (tokens: { access_token: string; refresh_token: string }) => void) => {
+      const handler = (_e: any, tokens: { access_token: string; refresh_token: string }) => callback(tokens);
+      ipcRenderer.on('auth:deep-link', handler);
+      return () => ipcRenderer.removeListener('auth:deep-link', handler);
+    },
+  },
+
   // Events from main process
   onForceSaveSession: (callback: () => void) => {
     ipcRenderer.on('force-save-session', callback);
     return () => ipcRenderer.removeListener('force-save-session', callback);
   },
 });
-
